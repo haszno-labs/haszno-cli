@@ -19,6 +19,7 @@ import type {
   CatalogueItem,
   ImportListItem,
   StoreConnection,
+  ConnectStorePushResult,
 } from '../client/index.js'
 
 // ---- helpers ----------------------------------------------------------------
@@ -248,16 +249,24 @@ export function registerCatalogueCommands(program: Command, client: HasznoClient
           return
         }
 
-        const result = await client.importList.push({
-          ids,
-          targetConnectionId: opts.target,
-        })
-        if (isJsonMode(cmd)) {
-          console.log(JSON.stringify(result))
+        if (opts.target != null) {
+          // Connected-store path → POST /api/connect/stores/:id/push → {pushed, failed, errors}
+          const result = await client.importList.push({ ids, targetConnectionId: opts.target })
+          if (isJsonMode(cmd)) {
+            console.log(JSON.stringify(result))
+          } else {
+            console.log(`Kiküldve: ${result.pushed}, sikertelen: ${result.failed}`)
+            if (result.errors && result.errors.length > 0) {
+              for (const err of result.errors) console.error(`  - ${err}`)
+            }
+          }
         } else {
-          console.log(`Kiküldve: ${result.pushed}, sikertelen: ${result.failed}`)
-          if (result.errors.length > 0) {
-            for (const err of result.errors) console.error(`  - ${err}`)
+          // Import-list path → POST /api/import-list/push → {pushed} only
+          const result = await client.importList.push({ ids })
+          if (isJsonMode(cmd)) {
+            console.log(JSON.stringify(result))
+          } else {
+            console.log(`Kiküldve: ${result.pushed}`)
           }
         }
       } catch (e) {

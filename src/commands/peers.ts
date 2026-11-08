@@ -52,8 +52,16 @@ export function registerPeersCommands(program: Command, client: HasznoClient): v
     .description('Meghívó kód létrehozása egy szállítóhoz')
     .requiredOption('--supplier <id>', 'Szállító azonosítója', (v) => parseInt(v, 10))
     .requiredOption('--expires <datetime>', 'Lejárati idő ISO-8601-ben, pl. "2026-12-31T23:59:00Z"')
+    .option('--yes', 'Megerősítés kihagyása')
     .action(async (opts, cmd) => {
       try {
+        if (!opts.yes) {
+          console.log(`Meghívó létrehozása: szállító #${opts.supplier}, lejár: ${opts.expires}.`)
+          console.log('Add meg a --yes kapcsolót a megerősítéshez.')
+          process.exit(1)
+          return
+        }
+
         const invite = await client.peers.createInvite({
           supplierId: opts.supplier,
           expiresAt: opts.expires,

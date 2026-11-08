@@ -9,6 +9,7 @@ import type {
   CatalogueSearchResult,
   ImportListItem,
   StoreConnection,
+  ConnectStorePushResult,
   PeerInvite,
   PeerLink,
   BlogPost,
@@ -132,7 +133,8 @@ function makeClient(overrides: Partial<HasznoClient> = {}): HasznoClient {
     importList: {
       list: vi.fn().mockResolvedValue([IMPORT_ITEM]),
       add: vi.fn().mockResolvedValue({ added: 1, skipped: 0 }),
-      push: vi.fn().mockResolvedValue({ pushed: 1, failed: 0, errors: [] }),
+      // Default: no-target path returns { pushed } only (ImportListPushResult)
+      push: vi.fn().mockResolvedValue({ pushed: 1 }),
     },
     connections: {
       list: vi.fn().mockResolvedValue([CONNECTION]),
@@ -282,15 +284,76 @@ describe('haszno import push', () => {
     expect(exitSpy).toHaveBeenCalledWith(0)
   })
 
-  it('calls importList.push with --yes', async () => {
+  it('no-target path: calls importList.push without targetConnectionId and prints pushed only', async () => {
+    // The API for the no-target path returns { pushed } only — no failed/errors.
+    const client = makeClient({
+      importList: {
+        list: vi.fn(),
+        add: vi.fn(),
+        push: vi.fn().mockResolvedValue({ pushed: 2 }),
+      },
+    })
+    const program = makeCatalogueProgram(client)
+    await run(program, 'import', 'push', '--ids', '5,6', '--yes')
+    expect(client.importList.push).toHaveBeenCalledWith({ ids: [5, 6] })
+    const output = stdoutSpy.mock.calls.map((c: unknown[]) => c[0] as string).join('\n')
+    expect(output).toContain('Kiküldve: 2')
+    // Must NOT contain 'sikertelen' (failed) since no-target path has no failed field.
+    expect(output).not.toContain('sikertelen')
+  })
+
+  it('target path: calls importList.push with targetConnectionId and prints pushed/failed/errors', async () => {
+    // The API for the target path returns { pushed, failed, errors }.
+    const connectResult: ConnectStorePushResult = { pushed: 1, failed: 1, errors: ['Widget Pro: out of stock'] }
+    const client = makeClient({
+      importList: {
+        list: vi.fn(),
+        add: vi.fn(),
+        push: vi.fn().mockResolvedValue(connectResult),
+      },
+    })
+    const program = makeCatalogueProgram(client)
+    await run(program, 'import', 'push', '--ids', '5', '--target', '1', '--yes')
+    expect(client.importList.push).toHaveBeenCalledWith({ ids: [5], targetConnectionId: 1 })
+    const output = stdoutSpy.mock.calls.map((c: unknown[]) => c[0] as string).join('\n')
+    expect(output).toContain('Kiküldve: 1')
+    expect(output).toContain('sikertelen: 1')
+  })
+
+  it('target path: does not crash when errors array is empty', async () => {
+    // Regression guard: if the connected-store API omits errors, the CLI must not throw.
+    const client = makeClient({
+      importList: {
+        list: vi.fn(),
+        add: vi.fn(),
+        // Simulate a future regression where errors is missing from the response
+        push: vi.fn().mockResolvedValue({ pushed: 1, failed: 0 } as ConnectStorePushResult),
+      },
+    })
+    const program = makeCatalogueProgram(client)
+    // Must not throw even if errors is undefined (regression guard)
+    await expect(run(program, 'import', 'push', '--ids', '5', '--target', '1', '--yes')).resolves.not.toThrow()
+  })
+
+  it('--json with no-target prints { pushed } JSON', async () => {
     const client = makeClient()
     const program = makeCatalogueProgram(client)
     await run(program, '--json', 'import', 'push', '--ids', '5', '--yes')
-    expect(client.importList.push).toHaveBeenCalledWith(expect.objectContaining({ ids: [5] }))
+    expect(client.importList.push).toHaveBeenCalledWith({ ids: [5] })
+    const output = stdoutSpy.mock.calls.map((c: unknown[]) => c[0] as string).join('')
+    const parsed = JSON.parse(output) as { pushed: number }
+    expect(parsed.pushed).toBe(1)
+    expect('failed' in parsed).toBe(false)
   })
 
   it('passes --target as targetConnectionId', async () => {
-    const client = makeClient()
+    const client = makeClient({
+      importList: {
+        list: vi.fn(),
+        add: vi.fn(),
+        push: vi.fn().mockResolvedValue({ pushed: 1, failed: 0, errors: [] }),
+      },
+    })
     const program = makeCatalogueProgram(client)
     await run(program, 'import', 'push', '--ids', '5', '--target', '1', '--yes')
     expect(client.importList.push).toHaveBeenCalledWith(
@@ -342,10 +405,21 @@ describe('haszno connections list', () => {
 // ==============================================================================
 
 describe('haszno peers invite', () => {
-  it('calls peers.createInvite and prints code', async () => {
+  it('prints preview and exits non-zero without --yes', async () => {
     const client = makeClient()
     const program = makePeersProgram(client)
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as () => never)
     await run(program, 'peers', 'invite', '--supplier', '42', '--expires', '2026-12-31T23:59:00Z')
+    expect(client.peers.createInvite).not.toHaveBeenCalled()
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    const output = stdoutSpy.mock.calls.map((c: unknown[]) => c[0] as string).join('\n')
+    expect(output).toContain('--yes')
+  })
+
+  it('calls peers.createInvite and prints code with --yes', async () => {
+    const client = makeClient()
+    const program = makePeersProgram(client)
+    await run(program, 'peers', 'invite', '--supplier', '42', '--expires', '2026-12-31T23:59:00Z', '--yes')
     expect(client.peers.createInvite).toHaveBeenCalledWith({
       supplierId: 42,
       expiresAt: '2026-12-31T23:59:00Z',
@@ -354,10 +428,10 @@ describe('haszno peers invite', () => {
     expect(output).toContain('inv_abc123')
   })
 
-  it('--json prints invite JSON', async () => {
+  it('--json with --yes prints invite JSON', async () => {
     const client = makeClient()
     const program = makePeersProgram(client)
-    await run(program, '--json', 'peers', 'invite', '--supplier', '42', '--expires', '2026-12-31T23:59:00Z')
+    await run(program, '--json', 'peers', 'invite', '--supplier', '42', '--expires', '2026-12-31T23:59:00Z', '--yes')
     const output = stdoutSpy.mock.calls.map((c: unknown[]) => c[0] as string).join('')
     const parsed = JSON.parse(output) as PeerInvite
     expect(parsed.code).toBe('inv_abc123')
