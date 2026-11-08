@@ -69,7 +69,7 @@ export function readConfigFile(configPath = CONFIG_PATH): HasznoConfig {
 
 export function writeConfigFile(config: HasznoConfig, configPath = CONFIG_PATH): void {
   const dir = dirname(configPath)
-  mkdirSync(dir, { recursive: true })
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
   writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
 }
 
