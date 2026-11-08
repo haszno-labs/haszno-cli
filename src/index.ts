@@ -26,6 +26,9 @@ import { registerOrdersCommands } from './commands/orders.js'
 import { registerIdeasCommands } from './commands/ideas.js'
 import { registerFeedsCommands } from './commands/feeds.js'
 import { registerAccountCommands } from './commands/account.js'
+import { registerCatalogueCommands } from './commands/catalogue.js'
+import { registerPeersCommands } from './commands/peers.js'
+import { registerBlogCommands } from './commands/blog.js'
 
 const program = new Command()
   .name('haszno')
@@ -63,5 +66,8 @@ registerOrdersCommands(program, client)
 registerIdeasCommands(program, client)
 registerFeedsCommands(program, client)
 registerAccountCommands(program, client)
+registerCatalogueCommands(program, client)
+registerPeersCommands(program, client)
+registerBlogCommands(program, client)
 
 program.parse()
