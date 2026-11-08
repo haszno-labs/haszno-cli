@@ -150,7 +150,7 @@ function buildListCommand(rootProgram: Command, client: HasznoClient): Command {
         return
       }
 
-      console.log(`\nÁrfutár AI termékötlet lista  |  referencia: ${recs.anchor}  |  régió: ${recs.geo}`)
+      console.log(`\nHaszno AI termékötlet lista  |  referencia: ${recs.anchor}  |  régió: ${recs.geo}`)
       console.log(`Összesen ${(recs.items ?? []).length} javaslat${items.length < (recs.items ?? []).length ? `, szűrés után: ${items.length}` : ''}\n`)
 
       if (items.length === 0) {
