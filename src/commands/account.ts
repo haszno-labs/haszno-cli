@@ -17,7 +17,7 @@
  *
  * Config file format (~/.config/haszno/config.json):
  *   {
- *     "apiUrl": "https://api.haszno.hu",   // optional, overrides default
+ *     "apiUrl": "https://haszno.com",   // optional, overrides default
  *     "apiKey": "haszno_live_..."          // your API key
  *   }
  * This file is shared with the MCP server (haszno-mcp) — running `haszno login`
@@ -158,7 +158,7 @@ export function registerAccountCommands(
       }
       process.stdout.write('Haszno CLI bejelentkezés\n')
       process.stdout.write(`Konfigurációs fájl: ${configPath}\n\n`)
-      apiUrl = await askInput('API URL (Enter = alapértelmezett https://api.haszno.hu): ')
+      apiUrl = await askInput('API URL (Enter = alapértelmezett https://haszno.com): ')
       apiKey = await askInput('API kulcs: ')
     }
 
