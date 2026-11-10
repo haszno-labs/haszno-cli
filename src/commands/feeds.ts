@@ -30,7 +30,7 @@ function getBaseUrl(cmd: Command): string {
     opts.apiUrl ??
     process.env['HASZNO_API_URL'] ??
     process.env['ARFUTAR_API_URL'] ?? // silent fallback
-    'https://api.haszno.hu'
+    'https://haszno.com'
   return raw.replace(/\/$/, '')
 }
 

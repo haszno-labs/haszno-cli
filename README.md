@@ -19,7 +19,7 @@ npx haszno-install
 ### Kézi telepítés
 
 ```bash
-npm install -g @haszno/cli
+npm install -g github:haszno-labs/haszno-cli
 ```
 
 ## Bejelentkezés
@@ -33,7 +33,7 @@ Ez elmenti az API kulcsot és az URL-t a `~/.config/haszno/config.json` fájlba.
 
 ```json
 {
-  "apiUrl": "https://api.haszno.hu",
+  "apiUrl": "https://haszno.com",
   "apiKey": "haszno_live_..."
 }
 ```
@@ -109,7 +109,7 @@ haszno products list --json | jq '.[] | .name'
 
 ```json
 {
-  "apiUrl": "https://api.haszno.hu",
+  "apiUrl": "https://haszno.com",
   "apiKey": "haszno_live_..."
 }
 ```
@@ -136,8 +136,8 @@ Ez a három repó együtt alkotja a Haszno agent SDK-t:
 - A **CLI** és az **MCP szerver** ugyanazt az API kulcsot és konfigurációs fájlt
   (`~/.config/haszno/config.json`) használják — egyszeri `haszno login` mindkettőt
   konfigurálja.
-- A **CLI** telepítve van globálisan (`npm i -g @haszno/cli`), az **MCP szerver**
-  `npx`-en keresztül fut (`claude mcp add haszno -- npx -y @haszno/mcp`).
+- A **CLI** telepítve van globálisan (`npm i -g github:haszno-labs/haszno-cli`), az **MCP szerver**
+  `npx`-en keresztül fut (`claude mcp add haszno -- npx -y github:haszno-labs/haszno-mcp`).
 
 ---
 
@@ -158,7 +158,7 @@ npm run typecheck
 dropshipping automation platform. It lets you query products, pricing proposals,
 automation rules and orders directly from the terminal.
 
-Install: `npm install -g @haszno/cli`  
+Install: `npm install -g github:haszno-labs/haszno-cli`  
 Authenticate: `haszno login`  
 The same config file (`~/.config/haszno/config.json`) is shared with the MCP
 server, so one login configures both tools.
