@@ -26,8 +26,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "prepare": "tsup"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "commander": "^12.1.0"
