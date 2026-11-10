@@ -1,35 +1,37 @@
 # haszno-cli
 
-**Haszno** parancssori felület — kezeld a dropshipping adataidat a terminalból.
+**English** | [Magyar](README.hu.md)
 
-> Egyszeri bejelentkezés konfigurálja a CLI-t **és** az MCP szervert egyaránt.  
-> Webhely: [haszno.hu](https://haszno.hu)
+**Haszno** command-line interface — manage your dropshipping data from the terminal.
+
+> A single `haszno login` configures both the CLI **and** the MCP server.  
+> Website: [haszno.com](https://haszno.com)
 
 ---
 
-## Telepítés
+## Installation
 
-### Ajánlott: megosztott telepítő (CLI + MCP + skill egyszerre)
+### Recommended: shared installer (CLI + MCP + skill in one step)
 
 ```bash
-# A három haszno-labs csomag egyszerre telepíthető a megosztott installer szkripttel:
+# Install all three haszno-labs packages at once with the shared installer:
 npx haszno-install
 ```
 
-### Kézi telepítés
+### Manual installation
 
 ```bash
 npm install -g github:haszno-labs/haszno-cli
 ```
 
-## Bejelentkezés
+## Authentication
 
 ```bash
 haszno login
 ```
 
-Ez elmenti az API kulcsot és az URL-t a `~/.config/haszno/config.json` fájlba.
-**A fájl formátuma:**
+This saves your API key and URL to `~/.config/haszno/config.json`.  
+**Config file format:**
 
 ```json
 {
@@ -38,74 +40,73 @@ Ez elmenti az API kulcsot és az URL-t a `~/.config/haszno/config.json` fájlba.
 }
 ```
 
-> **Fontos:** Az MCP szerver (`haszno-mcp`) ugyanezt a fájlt olvassa.
-> Elegendő egyszer futtatni a `haszno login` parancsot — a CLI és az MCP szerver
-> is azonnal konfigurálva lesz.
+> **Note:** The MCP server (`haszno-mcp`) reads the same file.  
+> Running `haszno login` once configures both the CLI and the MCP server.
 
 ---
 
-## Használat
+## Usage
 
 ```bash
-# Súgó
+# Help
 haszno --help
 haszno account --help
 
-# Kapcsolat ellenőrzése
+# Check connection
 haszno account ping
 
-# Termékek listázása (veszteségesek szűrve)
+# List products (filter losing ones)
 haszno products list --losing
 
-# Javaslatok jóváhagyása
+# Approve proposals
 haszno proposals approve --ids 1,2,3 --yes
 
-# Szabályok futtatása
+# Run a rule
 haszno rules run 2 --yes
 
-# JSON kimenet gépi feldolgozáshoz
+# JSON output for scripting
 haszno products list --json | jq '.[] | .name'
 ```
 
-### Globális kapcsolók
+### Global flags
 
-| Kapcsoló | Leírás |
+| Flag | Description |
 |---|---|
-| `--json` | Gépi olvasható JSON kimenet |
-| `--api-url <url>` | API URL felülírása (env: `HASZNO_API_URL`) |
-| `--api-key <key>` | API kulcs felülírása (env: `HASZNO_API_KEY`) |
+| `--json` | Machine-readable JSON output |
+| `--api-url <url>` | Override API URL (env: `HASZNO_API_URL`) |
+| `--api-key <key>` | Override API key (env: `HASZNO_API_KEY`) |
 
-### Parancsok áttekintése
+### Commands overview
 
-| Parancs | Leírás |
+| Command | Description |
 |---|---|
-| `haszno login` | Bejelentkezés, konfig mentése |
-| `haszno account ping` | API kapcsolat ellenőrzése |
-| `haszno account stats` | Irányítópult összefoglaló |
-| `haszno account impact` | Haszon-mérő |
-| `haszno products list` | Termékek listázása |
-| `haszno products apply-prices --yes` | Ajánlott árak alkalmazása |
-| `haszno proposals list` | Árazási javaslatok |
-| `haszno proposals approve --yes` | Összes függő javaslat jóváhagyása |
-| `haszno rules list` | Automatizálási szabályok |
-| `haszno rules run <id> --yes` | Szabály manuális futtatása |
-| `haszno feeds import-supplier ...` | Szállítói feed import |
-| `haszno ideas list` | AI termékötletek |
-| `haszno orders list` | Rendelések |
+| `haszno login` | Authenticate and save config |
+| `haszno account ping` | Check API connection |
+| `haszno account stats` | Dashboard summary |
+| `haszno account impact` | Profit impact meter |
+| `haszno products list` | List products |
+| `haszno products apply-prices --yes` | Apply recommended prices |
+| `haszno proposals list` | List pricing proposals |
+| `haszno proposals approve --yes` | Approve all pending proposals |
+| `haszno rules list` | List automation rules |
+| `haszno rules run <id> --yes` | Run a rule manually |
+| `haszno feeds import-supplier ...` | Import supplier feed |
+| `haszno ideas list` | AI product ideas |
+| `haszno orders list` | List orders |
 
 ---
 
-## Konfiguráció
+## Configuration
 
-### Prioritási sorrend (magasabbtól alacsonyabbig)
+### Priority order (highest to lowest)
 
-1. `--api-url` / `--api-key` parancssori jelzők
-2. `HASZNO_API_URL` / `HASZNO_API_KEY` környezeti változók
-3. `~/.config/haszno/config.json` konfigurációs fájl (írja a `haszno login`)
-4. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (visszafelé kompatibilis fallback)
-5. `~/.config/arfutar/config.json` (visszafelé kompatibilis fallback)
+1. `--api-url` / `--api-key` command-line flags
+2. `HASZNO_API_URL` / `HASZNO_API_KEY` environment variables
+3. `~/.config/haszno/config.json` (written by `haszno login`)
+4. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (backward-compatible fallback)
+5. `~/.config/arfutar/config.json` (backward-compatible fallback)
 
-### Konfigurációs fájl formátuma
+### Config file format
 
 ```json
 {
@@ -114,34 +115,34 @@ haszno products list --json | jq '.[] | .name'
 }
 ```
 
-A fájl `chmod 600` jogosultsággal íródik — csak a te felhasználód olvashatja.
+The file is written with `chmod 600` — readable only by your user.
 
 ---
 
-## Kapcsolódó repók
+## Related repositories
 
-Ez a három repó együtt alkotja a Haszno agent SDK-t:
+These three repositories together form the Haszno agent SDK:
 
-| Repó | Csomag | Leírás |
+| Repo | Package | Description |
 |---|---|---|
-| [haszno-labs/haszno-cli](https://github.com/haszno-labs/haszno-cli) | `@haszno/cli` (bin: `haszno`) | **Ez a repó** — parancssori felület |
-| [haszno-labs/haszno-mcp](https://github.com/haszno-labs/haszno-mcp) | `@haszno/mcp` (bin: `haszno-mcp`) | MCP szerver Claude Code-hoz |
+| [haszno-labs/haszno-cli](https://github.com/haszno-labs/haszno-cli) | `@haszno/cli` (bin: `haszno`) | **This repo** — command-line interface |
+| [haszno-labs/haszno-mcp](https://github.com/haszno-labs/haszno-mcp) | `@haszno/mcp` (bin: `haszno-mcp`) | MCP server for Claude Code |
 | [haszno-labs/haszno-skill](https://github.com/haszno-labs/haszno-skill) | — | Claude agent skill (SKILL.md) |
 
-### Hogyan működnek együtt
+### How they work together
 
-- A **skill** (`haszno-skill`) megmondja Claude-nak, mikor és hogyan használja a
-  Haszno eszközöket. Ha az MCP szerver elérhető, az MCP eszközöket hívja; ha nincs,
-  a CLI-t futtatja fallbackként.
-- A **CLI** és az **MCP szerver** ugyanazt az API kulcsot és konfigurációs fájlt
-  (`~/.config/haszno/config.json`) használják — egyszeri `haszno login` mindkettőt
-  konfigurálja.
-- A **CLI** telepítve van globálisan (`npm i -g github:haszno-labs/haszno-cli`), az **MCP szerver**
-  `npx`-en keresztül fut (`claude mcp add haszno -- npx -y github:haszno-labs/haszno-mcp`).
+- The **skill** (`haszno-skill`) tells Claude when and how to use Haszno tools.
+  When the MCP server is available it calls MCP tools; otherwise it falls back to
+  the CLI.
+- The **CLI** and the **MCP server** share the same API key and config file
+  (`~/.config/haszno/config.json`) — one `haszno login` configures both.
+- The **CLI** is installed globally (`npm i -g github:haszno-labs/haszno-cli`);
+  the **MCP server** runs via `npx`
+  (`claude mcp add haszno -- npx -y github:haszno-labs/haszno-mcp`).
 
 ---
 
-## Fejlesztés
+## Development
 
 ```bash
 npm install
@@ -150,21 +151,10 @@ npm test
 npm run typecheck
 ```
 
----
-
-## English summary
-
-**haszno-cli** is the command-line interface for [Haszno](https://haszno.hu), a
-dropshipping automation platform. It lets you query products, pricing proposals,
-automation rules and orders directly from the terminal.
-
-Install: `npm install -g github:haszno-labs/haszno-cli`  
-Authenticate: `haszno login`  
-The same config file (`~/.config/haszno/config.json`) is shared with the MCP
-server, so one login configures both tools.
+Developer docs: [https://docs.haszno.com/en/](https://docs.haszno.com/en/)
 
 ---
 
-## Licenc
+## License
 
-MIT — lásd a [LICENSE](./LICENSE) fájlt.
+MIT — see the [LICENSE](./LICENSE) file.
