@@ -12,8 +12,10 @@
  * Writes need --yes; without it the command explains what would happen and exits 0.
  * Exit codes: 0 = ok, 1 = API/runtime error, 2 = usage error.
  */
+import { randomUUID } from 'node:crypto'
 import { Command } from 'commander'
-import type { HasznoClient, Proposal, ProposalStatus, ApproveResult, RollbackResult } from '../client/index.js'
+import type { HasznoClient, Proposal, ProposalStatus, ApproveResult, RollbackResult, AgentProposalResult } from '../client/index.js'
+import { ShopTokenNotSupportedError } from '../client/index.js'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -226,6 +228,7 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
       try {
         result = await client.proposals.approve(ids ? { ids } : {})
       } catch (err) {
+        if (err instanceof ShopTokenNotSupportedError) die(err.message, 1)
         die(err instanceof Error ? err.message : String(err))
       }
 
@@ -266,6 +269,7 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
       try {
         result = await client.proposals.reject({ ids })
       } catch (err) {
+        if (err instanceof ShopTokenNotSupportedError) die(err.message, 1)
         die(err instanceof Error ? err.message : String(err))
       }
 
@@ -295,6 +299,7 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
       try {
         result = await client.proposals.rollback({ batchId: opts.batch })
       } catch (err) {
+        if (err instanceof ShopTokenNotSupportedError) die(err.message, 1)
         die(err instanceof Error ? err.message : String(err))
       }
 
@@ -302,6 +307,51 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
         printJson(result)
       } else {
         process.stdout.write(`Visszagörgetett javaslatok: ${result.rolledBack}\n`)
+      }
+    })
+
+  // ── proposals propose ───────────────────────────────────────────────────
+  proposals
+    .command('propose')
+    .description(
+      'Árjavaslat beküldése bolt API-tokennel (shop token) — emberi jóváhagyást igényel.\n' +
+        'Csak "haszno_" előtagú tokennel (HASZNO_API_TOKEN vagy --api-key) működik.',
+    )
+    .requiredOption('--product-id <id>', 'A termék azonosítója (integer)')
+    .requiredOption('--price <gross>', 'Javasolt bruttó ár egész forintban')
+    .requiredOption('--reason <text>', 'Szöveges indoklás (1–500 karakter) a bolt tulajdonosának')
+    .action(async (opts: { productId: string; price: string; reason: string }, cmd: Command) => {
+      const productId = Number(opts.productId)
+      if (!Number.isInteger(productId) || productId <= 0) die(`Érvénytelen termék ID: "${opts.productId}"`, 2)
+
+      const price = Number(opts.price)
+      if (!Number.isInteger(price) || price <= 0) die(`Érvénytelen ár: "${opts.price}"`, 2)
+
+      if (!opts.reason.trim() || opts.reason.length > 500) die('Az indoklás 1–500 karakter lehet.', 2)
+
+      // Generate nonce once; reused on transport retries.
+      const nonce = randomUUID()
+
+      let result: AgentProposalResult
+      try {
+        result = await client.proposals.propose({
+          productId,
+          proposedPriceGross: price,
+          reason: opts.reason.trim(),
+          nonce,
+        })
+      } catch (err) {
+        if (err instanceof ShopTokenNotSupportedError) die(err.message, 1)
+        die(err instanceof Error ? err.message : String(err))
+      }
+
+      if (isJsonMode(cmd)) {
+        printJson(result)
+      } else {
+        process.stdout.write(
+          `Javaslat beküldve (ID: ${result.id}, állapot: ${result.status}).\n` +
+            'Az ár nem változott — a bolt tulajdonosának jóvá kell hagynia a Haszno webalkalmazásban.\n',
+        )
       }
     })
 }

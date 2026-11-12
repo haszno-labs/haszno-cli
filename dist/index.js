@@ -56,7 +56,7 @@ function readConfigFile(configPath = CONFIG_PATH) {
 var normalizeUrl = (url) => url.replace(/\/+$/, "");
 var nonEmpty = (v) => v ? v : void 0;
 function resolveConnection(opts = {}, env = process.env, readConfig = readConfigFile) {
-  let apiKey = nonEmpty(opts.apiKey) ?? nonEmpty(env["HASZNO_API_KEY"]) ?? nonEmpty(env["ARFUTAR_API_KEY"]);
+  let apiKey = nonEmpty(opts.apiKey) ?? nonEmpty(env["HASZNO_API_TOKEN"]) ?? nonEmpty(env["HASZNO_API_KEY"]) ?? nonEmpty(env["ARFUTAR_API_KEY"]);
   let basicAuth = nonEmpty(opts.basicAuth) ?? nonEmpty(env["HASZNO_BASIC"]) ?? nonEmpty(env["ARFUTAR_BASIC"]);
   let baseUrl = nonEmpty(opts.baseUrl) ?? nonEmpty(env["HASZNO_API_URL"]) ?? nonEmpty(env["ARFUTAR_API_URL"]);
   if (!apiKey && !basicAuth) {
@@ -72,9 +72,16 @@ function resolveConnection(opts = {}, env = process.env, readConfig = readConfig
 }
 
 // src/client/http.ts
+var SHOP_TOKEN_PREFIX = "haszno_";
+function isShopToken(key) {
+  return !!key?.startsWith(SHOP_TOKEN_PREFIX);
+}
 var CLI_VERSION = "0.1.0";
 function buildAuthHeader(conn) {
-  if (conn.apiKey) return { "x-api-key": conn.apiKey };
+  if (conn.apiKey) {
+    if (isShopToken(conn.apiKey)) return { Authorization: `Bearer ${conn.apiKey}` };
+    return { "x-api-key": conn.apiKey };
+  }
   if (conn.basicAuth) {
     const encoded = Buffer.from(conn.basicAuth).toString("base64");
     return { Authorization: `Basic ${encoded}` };
@@ -153,7 +160,127 @@ function del(path, opts) {
 }
 
 // src/client/index.ts
+var ShopTokenNotSupportedError = class extends Error {
+  isShopTokenNotSupported = true;
+  operation;
+  constructor(operation) {
+    super(
+      `"${operation}" nem \xE9rhet\u0151 el bolt API-tokennel \u2014 haszn\xE1lja a Haszno webalkalmaz\xE1st (https://haszno.com). Az \xFCgyn\xF6k-token csak olvas\xE1si (GET /api/agent/*) \xE9s javaslat-bek\xFCld\xE9si (POST /api/agent/proposals) m\u0171veletekre jogosult.`
+    );
+    this.name = "ShopTokenNotSupportedError";
+    this.operation = operation;
+  }
+};
+function notSupported(op) {
+  return (..._args) => {
+    return Promise.reject(new ShopTokenNotSupportedError(op));
+  };
+}
 function createClient(opts = {}) {
+  const conn = resolveConnection(opts, process.env, opts.readConfig);
+  if (isShopToken(conn.apiKey)) {
+    return createShopTokenClient(opts);
+  }
+  return createLegacyClient(opts);
+}
+function createShopTokenClient(opts) {
+  const o = opts;
+  return {
+    health: {
+      check: () => get("/api/health", o)
+    },
+    settings: {
+      get: notSupported("settings.get"),
+      update: notSupported("settings.update")
+    },
+    products: {
+      list: (_params) => get("/api/agent/products", o),
+      update: notSupported("products.update"),
+      setListing: notSupported("products.setListing"),
+      generateAiDescription: notSupported("products.generateAiDescription"),
+      applyPrices: notSupported("products.applyPrices")
+    },
+    stats: {
+      get: notSupported("stats.get"),
+      getImpact: notSupported("stats.getImpact")
+    },
+    suppliers: {
+      list: notSupported("suppliers.list")
+    },
+    feeds: {
+      importFeed: notSupported("feeds.importFeed"),
+      importMarketPrices: notSupported("feeds.importMarketPrices")
+    },
+    orders: {
+      list: () => get("/api/agent/orders", o),
+      receiveOrder: notSupported("orders.receiveOrder"),
+      ship: notSupported("orders.ship"),
+      createDemo: notSupported("orders.createDemo")
+    },
+    recommendations: {
+      get: notSupported("recommendations.get"),
+      getAiShortlist: notSupported("recommendations.getAiShortlist"),
+      fillTrendKeywords: notSupported("recommendations.fillTrendKeywords")
+    },
+    rules: {
+      listTemplates: notSupported("rules.listTemplates"),
+      list: notSupported("rules.list"),
+      create: notSupported("rules.create"),
+      update: notSupported("rules.update"),
+      delete: notSupported("rules.delete"),
+      run: notSupported("rules.run"),
+      runAll: notSupported("rules.runAll"),
+      trigger: notSupported("rules.trigger"),
+      listRuns: notSupported("rules.listRuns"),
+      undoUnlists: notSupported("rules.undoUnlists")
+    },
+    proposals: {
+      list: (_params) => get("/api/agent/proposals", o),
+      approve: notSupported("proposals.approve"),
+      reject: notSupported("proposals.reject"),
+      rollback: notSupported("proposals.rollback"),
+      propose: (body) => post("/api/agent/proposals", body, o)
+    },
+    automation: {
+      get: notSupported("automation.get"),
+      set: notSupported("automation.set")
+    },
+    network: {
+      listSuppliers: notSupported("network.listSuppliers"),
+      getSupplierProducts: notSupported("network.getSupplierProducts"),
+      connect: notSupported("network.connect"),
+      disconnect: notSupported("network.disconnect"),
+      sync: notSupported("network.sync"),
+      getSupplierView: notSupported("network.getSupplierView")
+    },
+    catalogue: {
+      search: notSupported("catalogue.search")
+    },
+    importList: {
+      list: notSupported("importList.list"),
+      add: notSupported("importList.add"),
+      push: notSupported("importList.push")
+    },
+    connections: {
+      list: notSupported("connections.list"),
+      get: notSupported("connections.get")
+    },
+    peers: {
+      createInvite: notSupported("peers.createInvite"),
+      listInvites: notSupported("peers.listInvites"),
+      revokeInvite: notSupported("peers.revokeInvite"),
+      acceptInvite: notSupported("peers.acceptInvite"),
+      listLinks: notSupported("peers.listLinks"),
+      removeLink: notSupported("peers.removeLink"),
+      setVisibility: notSupported("peers.setVisibility")
+    },
+    blog: {
+      list: notSupported("blog.list"),
+      get: notSupported("blog.get")
+    }
+  };
+}
+function createLegacyClient(opts) {
   const o = opts;
   return {
     health: {
@@ -220,7 +347,8 @@ function createClient(opts = {}) {
       },
       approve: (body) => post("/api/proposals/approve", body ?? {}, o),
       reject: (body) => post("/api/proposals/reject", body, o),
-      rollback: (body) => post("/api/proposals/rollback", body, o)
+      rollback: (body) => post("/api/proposals/rollback", body, o),
+      propose: notSupported("proposals.propose (requires a shop API token)")
     },
     automation: {
       get: () => get("/api/automation", o),
@@ -263,7 +391,6 @@ function createClient(opts = {}) {
         return get(`/api/import-list${suffix}`, o);
       },
       add: (body) => post("/api/import-list", body, o),
-      // Routes to the correct endpoint depending on whether a target connection is given.
       push: ((body) => {
         if (body.targetConnectionId != null) {
           return post(
@@ -561,6 +688,7 @@ function registerProductsCommands(program2, client2) {
 }
 
 // src/commands/proposals.ts
+import { randomUUID } from "crypto";
 function isJsonMode(cmd) {
   let c = cmd;
   while (c.parent) c = c.parent;
@@ -717,6 +845,7 @@ Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
     try {
       result = await client2.proposals.approve(ids ? { ids } : {});
     } catch (err) {
+      if (err instanceof ShopTokenNotSupportedError) die(err.message, 1);
       die(err instanceof Error ? err.message : String(err));
     }
     if (isJsonMode(cmd)) {
@@ -746,6 +875,7 @@ Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
     try {
       result = await client2.proposals.reject({ ids });
     } catch (err) {
+      if (err instanceof ShopTokenNotSupportedError) die(err.message, 1);
       die(err instanceof Error ? err.message : String(err));
     }
     if (isJsonMode(cmd)) {
@@ -768,6 +898,7 @@ Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
     try {
       result = await client2.proposals.rollback({ batchId: opts.batch });
     } catch (err) {
+      if (err instanceof ShopTokenNotSupportedError) die(err.message, 1);
       die(err instanceof Error ? err.message : String(err));
     }
     if (isJsonMode(cmd)) {
@@ -775,6 +906,37 @@ Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
     } else {
       process.stdout.write(`Visszag\xF6rgetett javaslatok: ${result.rolledBack}
 `);
+    }
+  });
+  proposals.command("propose").description(
+    '\xC1rjavaslat bek\xFCld\xE9se bolt API-tokennel (shop token) \u2014 emberi j\xF3v\xE1hagy\xE1st ig\xE9nyel.\nCsak "haszno_" el\u0151tag\xFA tokennel (HASZNO_API_TOKEN vagy --api-key) m\u0171k\xF6dik.'
+  ).requiredOption("--product-id <id>", "A term\xE9k azonos\xEDt\xF3ja (integer)").requiredOption("--price <gross>", "Javasolt brutt\xF3 \xE1r eg\xE9sz forintban").requiredOption("--reason <text>", "Sz\xF6veges indokl\xE1s (1\u2013500 karakter) a bolt tulajdonos\xE1nak").action(async (opts, cmd) => {
+    const productId = Number(opts.productId);
+    if (!Number.isInteger(productId) || productId <= 0) die(`\xC9rv\xE9nytelen term\xE9k ID: "${opts.productId}"`, 2);
+    const price = Number(opts.price);
+    if (!Number.isInteger(price) || price <= 0) die(`\xC9rv\xE9nytelen \xE1r: "${opts.price}"`, 2);
+    if (!opts.reason.trim() || opts.reason.length > 500) die("Az indokl\xE1s 1\u2013500 karakter lehet.", 2);
+    const nonce = randomUUID();
+    let result;
+    try {
+      result = await client2.proposals.propose({
+        productId,
+        proposedPriceGross: price,
+        reason: opts.reason.trim(),
+        nonce
+      });
+    } catch (err) {
+      if (err instanceof ShopTokenNotSupportedError) die(err.message, 1);
+      die(err instanceof Error ? err.message : String(err));
+    }
+    if (isJsonMode(cmd)) {
+      printJson(result);
+    } else {
+      process.stdout.write(
+        `Javaslat bek\xFCldve (ID: ${result.id}, \xE1llapot: ${result.status}).
+Az \xE1r nem v\xE1ltozott \u2014 a bolt tulajdonos\xE1nak j\xF3v\xE1 kell hagynia a Haszno webalkalmaz\xE1sban.
+`
+      );
     }
   });
 }
