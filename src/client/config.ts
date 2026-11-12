@@ -9,9 +9,10 @@
  *   5. ~/.config/arfutar/config.json (silent fallback for migration)
  *   6. https://haszno.com, no credentials
  *
- * The config file is used as one unit: its values are read only when neither a flag nor the
- * environment supplies credentials, so a key from the environment is never sent to a URL that
- * only the config file names.
+ * The config file is used as one unit: it is read only when neither a flag nor the environment
+ * supplies credentials (so an environment key is never sent to a URL that only the file names),
+ * and its credentials are sent only to the URL they were saved for (so a saved key is never sent
+ * to a different server named by --api-url or HASZNO_API_URL).
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -29,23 +30,42 @@ export interface HasznoConfig {
   basicAuth?: string
 }
 
+/** Parse a config file; anything that is not a JSON object with string values is ignored. */
+function parseConfig(raw: string): HasznoConfig {
+  const parsed: unknown = JSON.parse(raw)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const src = parsed as Record<string, unknown>
+  const out: HasznoConfig = {}
+  for (const key of ['apiUrl', 'apiKey', 'basicAuth'] as const) {
+    if (typeof src[key] === 'string') out[key] = src[key]
+  }
+  return out
+}
+
+/** Raw file contents as an object (for rewriting the file without losing unknown keys). */
+export function readConfigObject(configPath = CONFIG_PATH): Record<string, unknown> {
+  try {
+    if (existsSync(configPath)) {
+      const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf-8'))
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+    }
+  } catch {
+    // unreadable or malformed: start from an empty object
+  }
+  return {}
+}
+
 export function readConfigFile(configPath = CONFIG_PATH): HasznoConfig {
   // Try primary config path first
   try {
-    if (existsSync(configPath)) {
-      const raw = readFileSync(configPath, 'utf-8')
-      return JSON.parse(raw) as HasznoConfig
-    }
+    if (existsSync(configPath)) return parseConfig(readFileSync(configPath, 'utf-8'))
   } catch {
     // fall through to legacy
   }
   // Silent fallback: read old arfutar config if haszno config does not exist
   if (configPath === CONFIG_PATH) {
     try {
-      if (existsSync(LEGACY_CONFIG_PATH)) {
-        const raw = readFileSync(LEGACY_CONFIG_PATH, 'utf-8')
-        return JSON.parse(raw) as HasznoConfig
-      }
+      if (existsSync(LEGACY_CONFIG_PATH)) return parseConfig(readFileSync(LEGACY_CONFIG_PATH, 'utf-8'))
     } catch {
       // ignore
     }
@@ -65,6 +85,7 @@ export interface Connection {
   basicAuth?: string
 }
 
+const normalizeUrl = (url: string): string => url.replace(/\/+$/, '')
 const nonEmpty = (v: string | undefined): string | undefined => (v ? v : undefined)
 
 /**
@@ -82,10 +103,15 @@ export function resolveConnection(
 
   if (!apiKey && !basicAuth) {
     const config = readConfig()
-    apiKey = nonEmpty(config.apiKey)
-    basicAuth = nonEmpty(config.basicAuth)
+    const configUrl = normalizeUrl(nonEmpty(config.apiUrl) ?? DEFAULT_API_URL)
     baseUrl ??= nonEmpty(config.apiUrl)
+    // Saved credentials belong to the server they were saved for: if a flag or the environment points
+    // somewhere else, they are not sent there.
+    if (normalizeUrl(baseUrl ?? DEFAULT_API_URL) === configUrl) {
+      apiKey = nonEmpty(config.apiKey)
+      basicAuth = nonEmpty(config.basicAuth)
+    }
   }
 
-  return { baseUrl: (baseUrl ?? DEFAULT_API_URL).replace(/\/$/, ''), apiKey, basicAuth }
+  return { baseUrl: normalizeUrl(baseUrl ?? DEFAULT_API_URL), apiKey, basicAuth }
 }

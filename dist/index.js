@@ -20,25 +20,40 @@ import { join } from "path";
 var CONFIG_PATH = join(homedir(), ".config", "haszno", "config.json");
 var LEGACY_CONFIG_PATH = join(homedir(), ".config", "arfutar", "config.json");
 var DEFAULT_API_URL = "https://haszno.com";
-function readConfigFile(configPath = CONFIG_PATH) {
+function parseConfig(raw) {
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const src = parsed;
+  const out = {};
+  for (const key of ["apiUrl", "apiKey", "basicAuth"]) {
+    if (typeof src[key] === "string") out[key] = src[key];
+  }
+  return out;
+}
+function readConfigObject(configPath = CONFIG_PATH) {
   try {
     if (existsSync(configPath)) {
-      const raw = readFileSync(configPath, "utf-8");
-      return JSON.parse(raw);
+      const parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
     }
+  } catch {
+  }
+  return {};
+}
+function readConfigFile(configPath = CONFIG_PATH) {
+  try {
+    if (existsSync(configPath)) return parseConfig(readFileSync(configPath, "utf-8"));
   } catch {
   }
   if (configPath === CONFIG_PATH) {
     try {
-      if (existsSync(LEGACY_CONFIG_PATH)) {
-        const raw = readFileSync(LEGACY_CONFIG_PATH, "utf-8");
-        return JSON.parse(raw);
-      }
+      if (existsSync(LEGACY_CONFIG_PATH)) return parseConfig(readFileSync(LEGACY_CONFIG_PATH, "utf-8"));
     } catch {
     }
   }
   return {};
 }
+var normalizeUrl = (url) => url.replace(/\/+$/, "");
 var nonEmpty = (v) => v ? v : void 0;
 function resolveConnection(opts = {}, env = process.env, readConfig = readConfigFile) {
   let apiKey = nonEmpty(opts.apiKey) ?? nonEmpty(env["HASZNO_API_KEY"]) ?? nonEmpty(env["ARFUTAR_API_KEY"]);
@@ -46,11 +61,14 @@ function resolveConnection(opts = {}, env = process.env, readConfig = readConfig
   let baseUrl = nonEmpty(opts.baseUrl) ?? nonEmpty(env["HASZNO_API_URL"]) ?? nonEmpty(env["ARFUTAR_API_URL"]);
   if (!apiKey && !basicAuth) {
     const config = readConfig();
-    apiKey = nonEmpty(config.apiKey);
-    basicAuth = nonEmpty(config.basicAuth);
+    const configUrl = normalizeUrl(nonEmpty(config.apiUrl) ?? DEFAULT_API_URL);
     baseUrl ??= nonEmpty(config.apiUrl);
+    if (normalizeUrl(baseUrl ?? DEFAULT_API_URL) === configUrl) {
+      apiKey = nonEmpty(config.apiKey);
+      basicAuth = nonEmpty(config.basicAuth);
+    }
   }
-  return { baseUrl: (baseUrl ?? DEFAULT_API_URL).replace(/\/$/, ""), apiKey, basicAuth };
+  return { baseUrl: normalizeUrl(baseUrl ?? DEFAULT_API_URL), apiKey, basicAuth };
 }
 
 // src/client/http.ts
@@ -1812,8 +1830,9 @@ async function askInput(message) {
 }
 function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH } = {}) {
   const loginAction = async (opts, cmd) => {
-    const merged = { ...cmd?.optsWithGlobals() ?? {}, ...opts };
-    let { apiUrl, apiKey } = merged;
+    const globals = cmd?.optsWithGlobals() ?? {};
+    let apiUrl = opts.apiUrl ?? globals.apiUrl;
+    let apiKey = opts.apiKey ?? globals.apiKey;
     if (!apiUrl && !apiKey) {
       if (!process.stdin.isTTY) {
         process.stderr.write(
@@ -1829,8 +1848,7 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH }
       apiUrl = await askInput("API URL (Enter = alap\xE9rtelmezett https://haszno.com): ");
       apiKey = await askInput("API kulcs: ");
     }
-    const existing = readConfigFile(configPath);
-    const updated = { ...existing };
+    const updated = { ...readConfigFile(configPath), ...readConfigObject(configPath) };
     if (apiUrl) updated.apiUrl = apiUrl;
     if (apiKey) updated.apiKey = apiKey;
     writeConfigFile(updated, configPath);

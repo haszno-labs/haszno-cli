@@ -106,7 +106,7 @@ haszno products list --json | jq '.[] | .name'
 4. `~/.config/haszno/config.json` (written by `haszno login`)
 5. `~/.config/arfutar/config.json` (backward-compatible fallback)
 
-The config file is only consulted when no credentials come from a flag or the environment — the same rule the MCP server follows.
+The config file is only consulted when no credentials come from a flag or the environment — the same rule the MCP server follows. Saved credentials are sent only to the URL they were saved for: if `--api-url` or `HASZNO_API_URL` points to a different server, pass the key for that server explicitly.
 
 ### Config file format
 

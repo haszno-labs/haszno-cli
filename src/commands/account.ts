@@ -30,7 +30,7 @@ import { createInterface } from 'node:readline'
 import type { Command } from 'commander'
 import type { HasznoClient } from '../client/index.js'
 import { HasznoApiError } from '../client/index.js'
-import { CONFIG_PATH, readConfigFile, type HasznoConfig } from '../client/config.js'
+import { CONFIG_PATH, readConfigFile, readConfigObject, type HasznoConfig } from '../client/config.js'
 
 export { CONFIG_PATH, LEGACY_CONFIG_PATH, readConfigFile, type HasznoConfig } from '../client/config.js'
 
@@ -116,8 +116,9 @@ export function registerAccountCommands(
   const loginAction = async (opts: { apiUrl?: string; apiKey?: string }, cmd?: Command) => {
     // --api-url / --api-key are also global options, and commander hands a flag that exists on both
     // levels to the program — so read the merged view, otherwise `haszno login --api-key …` sees nothing.
-    const merged = { ...((cmd?.optsWithGlobals() ?? {}) as { apiUrl?: string; apiKey?: string }), ...opts }
-    let { apiUrl, apiKey } = merged
+    const globals = (cmd?.optsWithGlobals() ?? {}) as { apiUrl?: string; apiKey?: string }
+    let apiUrl = opts.apiUrl ?? globals.apiUrl
+    let apiKey = opts.apiKey ?? globals.apiKey
 
     if (!apiUrl && !apiKey) {
       if (!process.stdin.isTTY) {
@@ -134,8 +135,9 @@ export function registerAccountCommands(
       apiKey = await askInput('API kulcs: ')
     }
 
-    const existing = readConfigFile(configPath)
-    const updated: HasznoConfig = { ...existing }
+    // Keep whatever is already in the file (including keys this CLI does not know, e.g. basicAuth);
+    // readConfigFile also carries values over from the legacy arfutar file on the first save.
+    const updated: HasznoConfig & Record<string, unknown> = { ...readConfigFile(configPath), ...readConfigObject(configPath) }
     if (apiUrl) updated.apiUrl = apiUrl
     if (apiKey) updated.apiKey = apiKey
 

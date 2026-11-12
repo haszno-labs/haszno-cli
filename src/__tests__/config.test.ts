@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { resolveConnection } from '../client/config.js'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { readConfigFile, resolveConnection } from '../client/config.js'
 import { request } from '../client/http.js'
 
 const noConfig = () => ({})
@@ -44,6 +47,23 @@ describe('resolveConnection', () => {
     expect(resolveConnection({}, {}, () => ({ apiUrl: 'https://only-url.example' })).baseUrl).toBe('https://only-url.example')
   })
 
+  it('does not send saved credentials to a different server named by a flag or the environment', () => {
+    const file = () => ({ apiUrl: 'https://self.example', apiKey: 'from-file', basicAuth: 'u:p' })
+    expect(resolveConnection({ baseUrl: 'https://other.example' }, {}, file)).toEqual({ baseUrl: 'https://other.example', apiKey: undefined, basicAuth: undefined })
+    expect(resolveConnection({}, { HASZNO_API_URL: 'https://staging.example' }, file)).toEqual({ baseUrl: 'https://staging.example', apiKey: undefined, basicAuth: undefined })
+  })
+
+  it('sends saved credentials when the flag or environment URL is the saved one', () => {
+    const file = () => ({ apiUrl: 'https://self.example/', apiKey: 'from-file' })
+    expect(resolveConnection({ baseUrl: 'https://self.example' }, {}, file).apiKey).toBe('from-file')
+  })
+
+  it('a key saved without a URL belongs to haszno.com', () => {
+    const file = () => ({ apiKey: 'from-file' })
+    expect(resolveConnection({}, {}, file)).toMatchObject({ baseUrl: 'https://haszno.com', apiKey: 'from-file' })
+    expect(resolveConnection({}, { HASZNO_API_URL: 'https://other.example' }, file).apiKey).toBeUndefined()
+  })
+
   it('treats empty strings as unset', () => {
     expect(resolveConnection({ apiKey: '' }, { HASZNO_API_KEY: '' }, () => ({ apiKey: 'from-file' })).apiKey).toBe('from-file')
   })
@@ -61,6 +81,20 @@ describe('request() uses the saved config', () => {
       expect((init.headers as Record<string, string>)['x-api-key']).toBe('from-file')
     } finally {
       Object.assign(process.env, saved)
+    }
+  })
+})
+
+describe('readConfigFile tolerates broken files', () => {
+  it.each([['null'], ['[]'], ['"text"'], ['42'], ['{ not json'], ['{"apiKey": 123, "apiUrl": ["x"]}']])('ignores %s', (content) => {
+    const dir = mkdtempSync(join(tmpdir(), 'haszno-cfg-'))
+    try {
+      const file = join(dir, 'config.json')
+      writeFileSync(file, content)
+      expect(readConfigFile(file)).toEqual({})
+      expect(() => resolveConnection({}, {}, () => readConfigFile(file))).not.toThrow()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })

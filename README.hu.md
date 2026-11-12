@@ -107,7 +107,7 @@ haszno products list --json | jq '.[] | .name'
 4. `~/.config/haszno/config.json` konfigurációs fájl (írja a `haszno login`)
 5. `~/.config/arfutar/config.json` (visszafelé kompatibilis fallback)
 
-A konfigurációs fájlt a CLI csak akkor olvassa be, ha sem jelző, sem környezeti változó nem ad hitelesítési adatot — ugyanez a szabály érvényes az MCP-szerverre is.
+A konfigurációs fájlt a CLI csak akkor olvassa be, ha sem jelző, sem környezeti változó nem ad hitelesítési adatot — ugyanez a szabály érvényes az MCP-szerverre is. A mentett hitelesítési adatokat a CLI csak arra az URL-re küldi el, amelyhez mentetted őket: ha a `--api-url` vagy a `HASZNO_API_URL` másik szerverre mutat, ahhoz külön add meg a kulcsot.
 
 ### Konfigurációs fájl formátuma
 
