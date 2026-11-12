@@ -45,6 +45,14 @@ import type {
   BlogPost,
   BlogListResult,
   BlogPeriod,
+  DailyReport,
+  DailyReportSummary,
+  ResearchBrief,
+  FindingsInput,
+  AgentAction,
+  ActionInput,
+  ActionStatus,
+  AutopilotSettings,
 } from './types.js'
 
 export type { HttpOptions }
@@ -175,6 +183,17 @@ export interface HasznoClient {
   blog: {
     list(params?: { period?: BlogPeriod; page?: number; perPage?: number }): Promise<BlogListResult>
     get(slug: string): Promise<BlogPost>
+  }
+
+  manager: {
+    listReports(): Promise<DailyReportSummary[]>
+    getLatestReport(): Promise<DailyReport | null>
+    getReport(day: string): Promise<DailyReport>
+    getResearchBrief(): Promise<ResearchBrief>
+    postFindings(day: string, body: FindingsInput): Promise<DailyReport>
+    listActions(params?: { status?: ActionStatus; limit?: number }): Promise<AgentAction[]>
+    proposeAction(body: ActionInput & { reason: string; reportItemId?: number }): Promise<AgentAction>
+    getAutopilot(): Promise<AutopilotSettings>
   }
 }
 
@@ -340,6 +359,25 @@ export function createClient(opts: HttpOptions = {}): HasznoClient {
         return get(`/api/blog${suffix}`, o)
       },
       get: (slug) => get(`/api/blog/${slug}`, o),
+    },
+
+    manager: {
+      listReports: () => get('/api/daily-reports', o),
+      // Agent-facing routes under /api/agent/ — Bearer tokens bypass the outer Basic-auth
+      // gate on Vercel and authenticate via the per-shop token handler (PR #108 on main).
+      getLatestReport: () => get('/api/agent/daily-report', o),
+      getReport: (day) => get(`/api/agent/daily-report/${day}`, o),
+      getResearchBrief: () => get('/api/agent/research-brief', o),
+      postFindings: (day, body) => post(`/api/agent/daily-report/${day}/findings`, body, o),
+      listActions: (params) => {
+        const qs = new URLSearchParams()
+        if (params?.status) qs.set('status', params.status)
+        if (params?.limit != null) qs.set('limit', String(params.limit))
+        const suffix = qs.toString() ? `?${qs.toString()}` : ''
+        return get(`/api/agent/actions${suffix}`, o)
+      },
+      proposeAction: (body) => post('/api/agent/actions', body, o),
+      getAutopilot: () => get('/api/agent/autopilot', o),
     },
   }
 }
