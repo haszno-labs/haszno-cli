@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { InvalidArgumentError, type Command } from 'commander'
 import type { HasznoClient, FeedImportResult, MarketImportResult } from '../client/index.js'
+import { resolveConnection } from '../client/config.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,15 +24,10 @@ function getJson(cmd: Command): boolean {
   return Boolean((cmd.optsWithGlobals() as { json?: boolean }).json)
 }
 
-/** Resolve the base URL respecting the --api-url override and HASZNO_API_URL env. */
+/** Resolve the base URL: --api-url flag > environment > config file (see client/config.ts). */
 function getBaseUrl(cmd: Command): string {
-  const opts = cmd.optsWithGlobals() as { apiUrl?: string }
-  const raw =
-    opts.apiUrl ??
-    process.env['HASZNO_API_URL'] ??
-    process.env['ARFUTAR_API_URL'] ?? // silent fallback
-    'https://haszno.com'
-  return raw.replace(/\/$/, '')
+  const opts = cmd.optsWithGlobals() as { apiUrl?: string; apiKey?: string }
+  return resolveConnection({ baseUrl: opts.apiUrl, apiKey: opts.apiKey }).baseUrl
 }
 
 /** Read UTF-8 text from a file path or from stdin (non-TTY only). */

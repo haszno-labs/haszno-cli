@@ -1,11 +1,27 @@
 /**
  * Low-level fetch wrapper — the ONLY place HTTP calls happen in the client.
- * - Auth from env: HASZNO_API_KEY → x-api-key header (falls back to ARFUTAR_API_KEY).
- * - Also accepts HASZNO_BASIC / ARFUTAR_BASIC for HTTP Basic auth.
- * - Never logs or exposes credentials.
- * - Retries 5xx and 429 with exponential back-off (max 3 attempts).
+ *
+ * Authentication is dual-mode:
+ *   - Shop API token (starts with "haszno_"): Authorization: Bearer <token>
+ *   - Non-prefixed key: x-api-key header (unchanged legacy behaviour).
+ *   - HTTP Basic ("user:password"): Authorization: Basic <base64> (unchanged).
+ *
+ * URL and credentials are resolved by resolveConnection() — the precedence is:
+ *   flags → HASZNO_API_TOKEN (new) → HASZNO_API_KEY / HASZNO_BASIC → ARFUTAR_*
+ *   → config file from `haszno login`.
+ * Never logs or exposes credentials.
+ * Retries 5xx and 429 with exponential back-off (max 3 attempts).
  */
 import { HasznoApiError } from './error.js'
+import { type Connection, type HasznoConfig, resolveConnection } from './config.js'
+
+/** Prefix that server-issued shop API tokens always carry. */
+export const SHOP_TOKEN_PREFIX = 'haszno_'
+
+/** Returns true when `key` is a server-issued shop API token. */
+export function isShopToken(key: string | undefined): key is string {
+  return !!key?.startsWith(SHOP_TOKEN_PREFIX)
+}
 
 export interface HttpOptions {
   baseUrl?: string
@@ -19,25 +35,22 @@ export interface HttpOptions {
   maxRetries?: number
   /** request timeout ms */
   timeoutMs?: number
+  /** config-file reader; defaults to ~/.config/haszno/config.json (override in tests) */
+  readConfig?: () => HasznoConfig
 }
 
 /** CLI version for User-Agent */
 const CLI_VERSION = '0.1.0'
 
-function buildAuthHeader(opts: HttpOptions): Record<string, string> {
-  // Never print credentials
-  const key =
-    opts.apiKey ??
-    process.env['HASZNO_API_KEY'] ??
-    process.env['ARFUTAR_API_KEY'] // silent fallback
-  if (key) return { 'x-api-key': key }
-
-  const basic =
-    opts.basicAuth ??
-    process.env['HASZNO_BASIC'] ??
-    process.env['ARFUTAR_BASIC'] // silent fallback
-  if (basic) {
-    const encoded = Buffer.from(basic).toString('base64')
+function buildAuthHeader(conn: Connection): Record<string, string> {
+  // Never print credentials.
+  if (conn.apiKey) {
+    // Shop API token → Bearer; any other key → x-api-key (legacy behaviour unchanged).
+    if (isShopToken(conn.apiKey)) return { Authorization: `Bearer ${conn.apiKey}` }
+    return { 'x-api-key': conn.apiKey }
+  }
+  if (conn.basicAuth) {
+    const encoded = Buffer.from(conn.basicAuth).toString('base64')
     return { Authorization: `Basic ${encoded}` }
   }
   return {}
@@ -53,13 +66,9 @@ export async function request<T>(
   body: unknown,
   opts: HttpOptions,
 ): Promise<T> {
-  const baseUrl = (
-    opts.baseUrl ??
-    process.env['HASZNO_API_URL'] ??
-    process.env['ARFUTAR_API_URL'] ?? // silent fallback
-    'https://haszno.com'
-  ).replace(/\/$/, '')
-  const url = `${baseUrl}${path}`
+  // Flags > environment (HASZNO_API_TOKEN/KEY/BASIC) > config file (see ./config.ts)
+  const conn = resolveConnection(opts, process.env, opts.readConfig)
+  const url = `${conn.baseUrl}${path}`
   const fetchFn = opts.fetch ?? fetch
 
   const maxRetries = opts.maxRetries ?? 3
@@ -70,7 +79,7 @@ export async function request<T>(
     'Content-Type': 'application/json',
     'Accept': 'application/json',
     'User-Agent': `haszno-cli/${CLI_VERSION}`,
-    ...buildAuthHeader(opts),
+    ...buildAuthHeader(conn),
   }
 
   let lastError: unknown

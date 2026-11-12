@@ -24,48 +24,17 @@
  * once configures both the CLI and the MCP server.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { homedir } from 'node:os'
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { Command } from 'commander'
 import type { HasznoClient } from '../client/index.js'
 import { HasznoApiError } from '../client/index.js'
+import { CONFIG_PATH, readConfigFile, readConfigObject, type HasznoConfig } from '../client/config.js'
+
+export { CONFIG_PATH, LEGACY_CONFIG_PATH, readConfigFile, type HasznoConfig } from '../client/config.js'
 
 // ── Config file ──────────────────────────────────────────────────────────────
-
-export const CONFIG_PATH = join(homedir(), '.config', 'haszno', 'config.json')
-/** Legacy path — read as silent fallback, never written */
-export const LEGACY_CONFIG_PATH = join(homedir(), '.config', 'arfutar', 'config.json')
-
-export interface HasznoConfig {
-  apiUrl?: string
-  apiKey?: string
-}
-
-export function readConfigFile(configPath = CONFIG_PATH): HasznoConfig {
-  // Try primary config path first
-  try {
-    if (existsSync(configPath)) {
-      const raw = readFileSync(configPath, 'utf-8')
-      return JSON.parse(raw) as HasznoConfig
-    }
-  } catch {
-    // fall through to legacy
-  }
-  // Silent fallback: read old arfutar config if haszno config does not exist
-  if (configPath === CONFIG_PATH) {
-    try {
-      if (existsSync(LEGACY_CONFIG_PATH)) {
-        const raw = readFileSync(LEGACY_CONFIG_PATH, 'utf-8')
-        return JSON.parse(raw) as HasznoConfig
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return {}
-}
 
 export function writeConfigFile(config: HasznoConfig, configPath = CONFIG_PATH): void {
   const dir = dirname(configPath)
@@ -144,8 +113,12 @@ export function registerAccountCommands(
 ): void {
 
   // ── login (top-level) ─────────────────────────────────────────────────────
-  const loginAction = async (opts: { apiUrl?: string; apiKey?: string }) => {
-    let { apiUrl, apiKey } = opts
+  const loginAction = async (opts: { apiUrl?: string; apiKey?: string }, cmd?: Command) => {
+    // --api-url / --api-key are also global options, and commander hands a flag that exists on both
+    // levels to the program — so read the merged view, otherwise `haszno login --api-key …` sees nothing.
+    const globals = (cmd?.optsWithGlobals() ?? {}) as { apiUrl?: string; apiKey?: string }
+    let apiUrl = opts.apiUrl ?? globals.apiUrl
+    let apiKey = opts.apiKey ?? globals.apiKey
 
     if (!apiUrl && !apiKey) {
       if (!process.stdin.isTTY) {
@@ -162,8 +135,9 @@ export function registerAccountCommands(
       apiKey = await askInput('API kulcs: ')
     }
 
-    const existing = readConfigFile(configPath)
-    const updated: HasznoConfig = { ...existing }
+    // Keep whatever is already in the file (including keys this CLI does not know, e.g. basicAuth);
+    // readConfigFile also carries values over from the legacy arfutar file on the first save.
+    const updated: HasznoConfig & Record<string, unknown> = { ...readConfigFile(configPath), ...readConfigObject(configPath) }
     if (apiUrl) updated.apiUrl = apiUrl
     if (apiKey) updated.apiKey = apiKey
 

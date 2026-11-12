@@ -24,7 +24,36 @@ npx haszno-install
 npm install -g github:haszno-labs/haszno-cli
 ```
 
-## Authentication
+## Authentication — two modes
+
+The CLI selects its mode automatically based on the credential you provide.
+
+### Mode 1 — Shop token (agent access, `haszno_` prefix)
+
+Shop tokens start with `haszno_` and grant read access to products and orders plus
+the ability to **submit price proposals**. Everything else (approve/reject/rollback
+proposals, automation rules, settings, feeds, catalog management, …) is blocked and
+returns an error immediately with no HTTP call.
+
+Shop tokens are issued in the Haszno web app → **API-kulcsok**:
+- Scopes: `read` (GET) and/or `write` (submit proposals)
+- Expiry: 90 days; renewal requires human approval
+- Human-only approval: the shop owner must accept each token request in the web app
+
+Set the token with the **preferred** env var:
+
+```bash
+export HASZNO_API_TOKEN=haszno_xxxxxxxxxxxxxxxxxxxx
+haszno proposals list        # reads /api/agent/proposals
+haszno proposals propose --product-id 42 --price 4990 --reason "piaci igazítás"
+```
+
+### Mode 2 — Legacy API key (full access)
+
+Any credential that does **not** start with `haszno_` is forwarded via `x-api-key`
+exactly as before. All commands and operations are available.
+
+### Login (saves to config file)
 
 ```bash
 haszno login
@@ -98,25 +127,28 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 |---|---|
 | `--json` | Machine-readable JSON output |
 | `--api-url <url>` | Override API URL (env: `HASZNO_API_URL`) |
-| `--api-key <key>` | Override API key (env: `HASZNO_API_KEY`) |
+| `--api-key <key>` | Override API key (env: `HASZNO_API_KEY` or `HASZNO_API_TOKEN`) |
 
 ### Commands overview
 
-| Command | Description |
-|---|---|
-| `haszno login` | Authenticate and save config |
-| `haszno account ping` | Check API connection |
-| `haszno account stats` | Dashboard summary |
-| `haszno account impact` | Profit impact meter |
-| `haszno products list` | List products |
-| `haszno products apply-prices --yes` | Apply recommended prices |
-| `haszno proposals list` | List pricing proposals |
-| `haszno proposals approve --yes` | Approve all pending proposals |
-| `haszno rules list` | List automation rules |
-| `haszno rules run <id> --yes` | Run a rule manually |
-| `haszno feeds import-supplier ...` | Import supplier feed |
-| `haszno ideas list` | AI product ideas |
-| `haszno orders list` | List orders |
+| Command | Mode | Description |
+|---|---|---|
+| `haszno login` | both | Authenticate and save config |
+| `haszno account ping` | both | Check API connection |
+| `haszno account stats` | legacy | Dashboard summary |
+| `haszno account impact` | legacy | Profit impact meter |
+| `haszno products list` | both | List products |
+| `haszno products apply-prices --yes` | legacy | Apply recommended prices |
+| `haszno proposals list` | both | List pricing proposals |
+| `haszno proposals propose ...` | shop token | Submit a new price proposal |
+| `haszno proposals approve --yes` | legacy | Approve all pending proposals |
+| `haszno proposals reject ...` | legacy | Reject proposals |
+| `haszno proposals rollback ...` | legacy | Roll back a proposal batch |
+| `haszno rules list` | legacy | List automation rules |
+| `haszno rules run <id> --yes` | legacy | Run a rule manually |
+| `haszno feeds import-supplier ...` | legacy | Import supplier feed |
+| `haszno ideas list` | legacy | AI product ideas |
+| `haszno orders list` | both | List orders |
 
 #### Haszno Manager — napi jelentés és agent-műveletek
 
@@ -149,10 +181,13 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 ### Priority order (highest to lowest)
 
 1. `--api-url` / `--api-key` command-line flags
-2. `HASZNO_API_URL` / `HASZNO_API_KEY` environment variables
-3. `~/.config/haszno/config.json` (written by `haszno login`)
+2. `HASZNO_API_TOKEN` environment variable (preferred for shop tokens)
+3. `HASZNO_API_URL` / `HASZNO_API_KEY` environment variables
 4. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (backward-compatible fallback)
-5. `~/.config/arfutar/config.json` (backward-compatible fallback)
+5. `~/.config/haszno/config.json` (written by `haszno login`)
+6. `~/.config/arfutar/config.json` (backward-compatible fallback)
+
+The config file is only consulted when no credentials come from a flag or the environment — the same rule the MCP server follows. Saved credentials are sent only to the URL they were saved for: if `--api-url` or `HASZNO_API_URL` points to a different server, pass the key for that server explicitly.
 
 ### Config file format
 
