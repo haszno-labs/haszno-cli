@@ -102,9 +102,11 @@ haszno products list --json | jq '.[] | .name'
 
 1. `--api-url` / `--api-key` command-line flags
 2. `HASZNO_API_URL` / `HASZNO_API_KEY` environment variables
-3. `~/.config/haszno/config.json` (written by `haszno login`)
-4. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (backward-compatible fallback)
+3. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (backward-compatible fallback)
+4. `~/.config/haszno/config.json` (written by `haszno login`)
 5. `~/.config/arfutar/config.json` (backward-compatible fallback)
+
+The config file is only consulted when no credentials come from a flag or the environment — the same rule the MCP server follows. Saved credentials are sent only to the URL they were saved for: if `--api-url` or `HASZNO_API_URL` points to a different server, pass the key for that server explicitly.
 
 ### Config file format
 

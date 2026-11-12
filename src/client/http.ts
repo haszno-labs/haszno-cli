@@ -1,11 +1,12 @@
 /**
  * Low-level fetch wrapper — the ONLY place HTTP calls happen in the client.
- * - Auth from env: HASZNO_API_KEY → x-api-key header (falls back to ARFUTAR_API_KEY).
- * - Also accepts HASZNO_BASIC / ARFUTAR_BASIC for HTTP Basic auth.
+ * - URL and credentials: flags > HASZNO_* env (ARFUTAR_* fallback) > config file from `haszno login`.
+ * - API key → x-api-key header; "user:password" → HTTP Basic auth.
  * - Never logs or exposes credentials.
  * - Retries 5xx and 429 with exponential back-off (max 3 attempts).
  */
 import { HasznoApiError } from './error.js'
+import { type Connection, type HasznoConfig, resolveConnection } from './config.js'
 
 export interface HttpOptions {
   baseUrl?: string
@@ -19,25 +20,18 @@ export interface HttpOptions {
   maxRetries?: number
   /** request timeout ms */
   timeoutMs?: number
+  /** config-file reader; defaults to ~/.config/haszno/config.json (override in tests) */
+  readConfig?: () => HasznoConfig
 }
 
 /** CLI version for User-Agent */
 const CLI_VERSION = '0.1.0'
 
-function buildAuthHeader(opts: HttpOptions): Record<string, string> {
+function buildAuthHeader(conn: Connection): Record<string, string> {
   // Never print credentials
-  const key =
-    opts.apiKey ??
-    process.env['HASZNO_API_KEY'] ??
-    process.env['ARFUTAR_API_KEY'] // silent fallback
-  if (key) return { 'x-api-key': key }
-
-  const basic =
-    opts.basicAuth ??
-    process.env['HASZNO_BASIC'] ??
-    process.env['ARFUTAR_BASIC'] // silent fallback
-  if (basic) {
-    const encoded = Buffer.from(basic).toString('base64')
+  if (conn.apiKey) return { 'x-api-key': conn.apiKey }
+  if (conn.basicAuth) {
+    const encoded = Buffer.from(conn.basicAuth).toString('base64')
     return { Authorization: `Basic ${encoded}` }
   }
   return {}
@@ -53,13 +47,9 @@ export async function request<T>(
   body: unknown,
   opts: HttpOptions,
 ): Promise<T> {
-  const baseUrl = (
-    opts.baseUrl ??
-    process.env['HASZNO_API_URL'] ??
-    process.env['ARFUTAR_API_URL'] ?? // silent fallback
-    'https://haszno.com'
-  ).replace(/\/$/, '')
-  const url = `${baseUrl}${path}`
+  // Flags > environment > config file written by `haszno login` (see ./config.ts)
+  const conn = resolveConnection(opts, process.env, opts.readConfig)
+  const url = `${conn.baseUrl}${path}`
   const fetchFn = opts.fetch ?? fetch
 
   const maxRetries = opts.maxRetries ?? 3
@@ -70,7 +60,7 @@ export async function request<T>(
     'Content-Type': 'application/json',
     'Accept': 'application/json',
     'User-Agent': `haszno-cli/${CLI_VERSION}`,
-    ...buildAuthHeader(opts),
+    ...buildAuthHeader(conn),
   }
 
   let lastError: unknown

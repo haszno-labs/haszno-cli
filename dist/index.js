@@ -13,14 +13,70 @@ var HasznoApiError = class extends Error {
   status;
 };
 
+// src/client/config.ts
+import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+var CONFIG_PATH = join(homedir(), ".config", "haszno", "config.json");
+var LEGACY_CONFIG_PATH = join(homedir(), ".config", "arfutar", "config.json");
+var DEFAULT_API_URL = "https://haszno.com";
+function parseConfig(raw) {
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const src = parsed;
+  const out = {};
+  for (const key of ["apiUrl", "apiKey", "basicAuth"]) {
+    if (typeof src[key] === "string") out[key] = src[key];
+  }
+  return out;
+}
+function readConfigObject(configPath = CONFIG_PATH) {
+  try {
+    if (existsSync(configPath)) {
+      const parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+  }
+  return {};
+}
+function readConfigFile(configPath = CONFIG_PATH) {
+  try {
+    if (existsSync(configPath)) return parseConfig(readFileSync(configPath, "utf-8"));
+  } catch {
+  }
+  if (configPath === CONFIG_PATH) {
+    try {
+      if (existsSync(LEGACY_CONFIG_PATH)) return parseConfig(readFileSync(LEGACY_CONFIG_PATH, "utf-8"));
+    } catch {
+    }
+  }
+  return {};
+}
+var normalizeUrl = (url) => url.replace(/\/+$/, "");
+var nonEmpty = (v) => v ? v : void 0;
+function resolveConnection(opts = {}, env = process.env, readConfig = readConfigFile) {
+  let apiKey = nonEmpty(opts.apiKey) ?? nonEmpty(env["HASZNO_API_KEY"]) ?? nonEmpty(env["ARFUTAR_API_KEY"]);
+  let basicAuth = nonEmpty(opts.basicAuth) ?? nonEmpty(env["HASZNO_BASIC"]) ?? nonEmpty(env["ARFUTAR_BASIC"]);
+  let baseUrl = nonEmpty(opts.baseUrl) ?? nonEmpty(env["HASZNO_API_URL"]) ?? nonEmpty(env["ARFUTAR_API_URL"]);
+  if (!apiKey && !basicAuth) {
+    const config = readConfig();
+    const configUrl = normalizeUrl(nonEmpty(config.apiUrl) ?? DEFAULT_API_URL);
+    baseUrl ??= nonEmpty(config.apiUrl);
+    if (normalizeUrl(baseUrl ?? DEFAULT_API_URL) === configUrl) {
+      apiKey = nonEmpty(config.apiKey);
+      basicAuth = nonEmpty(config.basicAuth);
+    }
+  }
+  return { baseUrl: normalizeUrl(baseUrl ?? DEFAULT_API_URL), apiKey, basicAuth };
+}
+
 // src/client/http.ts
 var CLI_VERSION = "0.1.0";
-function buildAuthHeader(opts) {
-  const key = opts.apiKey ?? process.env["HASZNO_API_KEY"] ?? process.env["ARFUTAR_API_KEY"];
-  if (key) return { "x-api-key": key };
-  const basic = opts.basicAuth ?? process.env["HASZNO_BASIC"] ?? process.env["ARFUTAR_BASIC"];
-  if (basic) {
-    const encoded = Buffer.from(basic).toString("base64");
+function buildAuthHeader(conn) {
+  if (conn.apiKey) return { "x-api-key": conn.apiKey };
+  if (conn.basicAuth) {
+    const encoded = Buffer.from(conn.basicAuth).toString("base64");
     return { Authorization: `Basic ${encoded}` };
   }
   return {};
@@ -29,9 +85,8 @@ async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 async function request(method, path, body, opts) {
-  const baseUrl = (opts.baseUrl ?? process.env["HASZNO_API_URL"] ?? process.env["ARFUTAR_API_URL"] ?? // silent fallback
-  "https://haszno.com").replace(/\/$/, "");
-  const url = `${baseUrl}${path}`;
+  const conn = resolveConnection(opts, process.env, opts.readConfig);
+  const url = `${conn.baseUrl}${path}`;
   const fetchFn = opts.fetch ?? fetch;
   const maxRetries = opts.maxRetries ?? 3;
   const retryDelayMs = opts.retryDelayMs ?? 500;
@@ -40,7 +95,7 @@ async function request(method, path, body, opts) {
     "Content-Type": "application/json",
     "Accept": "application/json",
     "User-Agent": `haszno-cli/${CLI_VERSION}`,
-    ...buildAuthHeader(opts)
+    ...buildAuthHeader(conn)
   };
   let lastError;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -1516,9 +1571,7 @@ function getJson(cmd) {
 }
 function getBaseUrl(cmd) {
   const opts = cmd.optsWithGlobals();
-  const raw = opts.apiUrl ?? process.env["HASZNO_API_URL"] ?? process.env["ARFUTAR_API_URL"] ?? // silent fallback
-  "https://haszno.com";
-  return raw.replace(/\/$/, "");
+  return resolveConnection({ baseUrl: opts.apiUrl, apiKey: opts.apiKey }).baseUrl;
 }
 async function readContent(filePath) {
   if (filePath) {
@@ -1718,31 +1771,9 @@ function registerFeedsCommands(program2, client2) {
 }
 
 // src/commands/account.ts
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { join, dirname } from "path";
-import { homedir } from "os";
+import { writeFileSync, mkdirSync } from "fs";
+import { dirname } from "path";
 import { createInterface as createInterface3 } from "readline";
-var CONFIG_PATH = join(homedir(), ".config", "haszno", "config.json");
-var LEGACY_CONFIG_PATH = join(homedir(), ".config", "arfutar", "config.json");
-function readConfigFile(configPath = CONFIG_PATH) {
-  try {
-    if (existsSync(configPath)) {
-      const raw = readFileSync(configPath, "utf-8");
-      return JSON.parse(raw);
-    }
-  } catch {
-  }
-  if (configPath === CONFIG_PATH) {
-    try {
-      if (existsSync(LEGACY_CONFIG_PATH)) {
-        const raw = readFileSync(LEGACY_CONFIG_PATH, "utf-8");
-        return JSON.parse(raw);
-      }
-    } catch {
-    }
-  }
-  return {};
-}
 function writeConfigFile(config, configPath = CONFIG_PATH) {
   const dir = dirname(configPath);
   mkdirSync(dir, { recursive: true, mode: 448 });
@@ -1798,8 +1829,10 @@ async function askInput(message) {
   });
 }
 function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH } = {}) {
-  const loginAction = async (opts) => {
-    let { apiUrl, apiKey } = opts;
+  const loginAction = async (opts, cmd) => {
+    const globals = cmd?.optsWithGlobals() ?? {};
+    let apiUrl = opts.apiUrl ?? globals.apiUrl;
+    let apiKey = opts.apiKey ?? globals.apiKey;
     if (!apiUrl && !apiKey) {
       if (!process.stdin.isTTY) {
         process.stderr.write(
@@ -1815,8 +1848,7 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH }
       apiUrl = await askInput("API URL (Enter = alap\xE9rtelmezett https://haszno.com): ");
       apiKey = await askInput("API kulcs: ");
     }
-    const existing = readConfigFile(configPath);
-    const updated = { ...existing };
+    const updated = { ...readConfigFile(configPath), ...readConfigObject(configPath) };
     if (apiUrl) updated.apiUrl = apiUrl;
     if (apiKey) updated.apiKey = apiKey;
     writeConfigFile(updated, configPath);
