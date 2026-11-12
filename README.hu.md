@@ -103,9 +103,11 @@ haszno products list --json | jq '.[] | .name'
 
 1. `--api-url` / `--api-key` parancssori jelzők
 2. `HASZNO_API_URL` / `HASZNO_API_KEY` környezeti változók
-3. `~/.config/haszno/config.json` konfigurációs fájl (írja a `haszno login`)
-4. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (visszafelé kompatibilis fallback)
+3. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (visszafelé kompatibilis fallback)
+4. `~/.config/haszno/config.json` konfigurációs fájl (írja a `haszno login`)
 5. `~/.config/arfutar/config.json` (visszafelé kompatibilis fallback)
+
+A konfigurációs fájlt a CLI csak akkor olvassa be, ha sem jelző, sem környezeti változó nem ad hitelesítési adatot — ugyanez a szabály érvényes az MCP-szerverre is.
 
 ### Konfigurációs fájl formátuma
 
