@@ -1,12 +1,27 @@
 /**
  * Haszno typed HTTP client (vendored).
  *
+ * Dual-mode: behaviour depends on the credential in use.
+ *
+ * SHOP TOKEN MODE — credential starts with "haszno_"
+ *   Accepted from HASZNO_API_TOKEN (preferred), HASZNO_API_KEY, ARFUTAR_API_KEY,
+ *   opts.apiKey, or the config file written by `haszno login`.
+ *   Sent as "Authorization: Bearer <token>".
+ *   Routes products / orders / proposals to the shop-scoped /api/agent/* endpoints.
+ *   Operations outside that scope (approve/reject/rollback, rules, feeds, …) throw
+ *   ShopTokenNotSupportedError immediately — no HTTP call is made.
+ *
+ * LEGACY MODE — anything else (non-prefixed key → x-api-key; Basic → Authorization: Basic)
+ *   Behaviour is byte-for-byte identical to the previous version of this file.
+ *   Same endpoints, same headers, same response shapes.
+ *
  * Usage:
  *   import { createClient } from './client/index.js'
  *   const client = createClient()   // reads HASZNO_API_URL + HASZNO_API_KEY from env
  *   const products = await client.products.list()
  */
-import { type HttpOptions, get, post, put, patch, del } from './http.js'
+import { type HttpOptions, get, post, put, patch, del, isShopToken } from './http.js'
+import { resolveConnection } from './config.js'
 import type {
   Settings,
   Product,
@@ -50,6 +65,53 @@ import type {
 export type { HttpOptions }
 export * from './types.js'
 export { HasznoApiError } from './error.js'
+export { isShopToken, SHOP_TOKEN_PREFIX } from './http.js'
+
+// ── Shop-token-specific types ──────────────────────────────────────────────────
+
+/**
+ * Body for POST /api/agent/proposals.
+ * The nonce must be generated once per user action (crypto.randomUUID()) and
+ * reused across transport retries of the same action.
+ */
+export interface AgentProposalBody {
+  productId: number
+  proposedPriceGross: number
+  reason: string
+  /** Opaque dedup key (1–128 chars). Repeating the same nonce returns 409. */
+  nonce: string
+}
+
+/** Response from POST /api/agent/proposals (201 Created). */
+export interface AgentProposalResult {
+  id: number
+  status: 'pending'
+  createdAt: string
+}
+
+// ── Error for disabled operations ─────────────────────────────────────────────
+
+/**
+ * Thrown when a shop API token calls an operation that requires a full session.
+ * Zero HTTP calls are made when this error is thrown.
+ */
+export class ShopTokenNotSupportedError extends Error {
+  readonly isShopTokenNotSupported = true
+  readonly operation: string
+
+  constructor(operation: string) {
+    super(
+      `"${operation}" nem érhető el bolt API-tokennel — használja a Haszno webalkalmazást ` +
+        '(https://haszno.com). ' +
+        'Az ügynök-token csak olvasási (GET /api/agent/*) és javaslat-beküldési ' +
+        '(POST /api/agent/proposals) műveletekre jogosult.',
+    )
+    this.name = 'ShopTokenNotSupportedError'
+    this.operation = operation
+  }
+}
+
+// ── Client interface ───────────────────────────────────────────────────────────
 
 export interface HasznoClient {
   health: {
@@ -115,6 +177,11 @@ export interface HasznoClient {
     approve(body?: { ids?: number[] }): Promise<ApproveResult>
     reject(body: { ids: number[] }): Promise<{ rejected: number }>
     rollback(body: { batchId: string }): Promise<RollbackResult>
+    /**
+     * Submit a price-change proposal via the agent endpoint (shop token only).
+     * The nonce must be generated once per action and reused on retries.
+     */
+    propose(body: AgentProposalBody): Promise<AgentProposalResult>
   }
 
   automation: {
@@ -178,7 +245,151 @@ export interface HasznoClient {
   }
 }
 
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+/** Returns a function that returns a rejected Promise (zero HTTP calls). */
+function notSupported(op: string): (..._args: unknown[]) => Promise<never> {
+  return (..._args: unknown[]): Promise<never> => {
+    return Promise.reject(new ShopTokenNotSupportedError(op))
+  }
+}
+
+// ── Factory ───────────────────────────────────────────────────────────────────
+
 export function createClient(opts: HttpOptions = {}): HasznoClient {
+  // Resolve the credential using the same precedence as request() so the
+  // mode detection matches what will actually be sent.
+  const conn = resolveConnection(opts, process.env, opts.readConfig)
+  if (isShopToken(conn.apiKey)) {
+    return createShopTokenClient(opts)
+  }
+  return createLegacyClient(opts)
+}
+
+/**
+ * Shop-token client: routes reads to /api/agent/*, blocks disabled ops.
+ * The token is sent as Authorization: Bearer (handled by http.ts buildAuthHeader).
+ */
+function createShopTokenClient(opts: HttpOptions): HasznoClient {
+  const o = opts
+
+  return {
+    health: {
+      check: () => get('/api/health', o),
+    },
+
+    settings: {
+      get: notSupported('settings.get'),
+      update: notSupported('settings.update'),
+    },
+
+    products: {
+      list: (_params?: { all?: boolean }) => get('/api/agent/products', o),
+      update: notSupported('products.update'),
+      setListing: notSupported('products.setListing'),
+      generateAiDescription: notSupported('products.generateAiDescription'),
+      applyPrices: notSupported('products.applyPrices'),
+    },
+
+    stats: {
+      get: notSupported('stats.get'),
+      getImpact: notSupported('stats.getImpact'),
+    },
+
+    suppliers: {
+      list: notSupported('suppliers.list'),
+    },
+
+    feeds: {
+      importFeed: notSupported('feeds.importFeed'),
+      importMarketPrices: notSupported('feeds.importMarketPrices'),
+    },
+
+    orders: {
+      list: () => get('/api/agent/orders', o),
+      receiveOrder: notSupported('orders.receiveOrder'),
+      ship: notSupported('orders.ship'),
+      createDemo: notSupported('orders.createDemo'),
+    },
+
+    recommendations: {
+      get: notSupported('recommendations.get'),
+      getAiShortlist: notSupported('recommendations.getAiShortlist'),
+      fillTrendKeywords: notSupported('recommendations.fillTrendKeywords'),
+    },
+
+    rules: {
+      listTemplates: notSupported('rules.listTemplates'),
+      list: notSupported('rules.list'),
+      create: notSupported('rules.create'),
+      update: notSupported('rules.update'),
+      delete: notSupported('rules.delete'),
+      run: notSupported('rules.run'),
+      runAll: notSupported('rules.runAll'),
+      trigger: notSupported('rules.trigger'),
+      listRuns: notSupported('rules.listRuns'),
+      undoUnlists: notSupported('rules.undoUnlists'),
+    },
+
+    proposals: {
+      list: (_params?: { status?: ProposalStatus }) => get('/api/agent/proposals', o),
+      approve: notSupported('proposals.approve'),
+      reject: notSupported('proposals.reject'),
+      rollback: notSupported('proposals.rollback'),
+      propose: (body: AgentProposalBody) => post('/api/agent/proposals', body, o),
+    },
+
+    automation: {
+      get: notSupported('automation.get'),
+      set: notSupported('automation.set'),
+    },
+
+    network: {
+      listSuppliers: notSupported('network.listSuppliers'),
+      getSupplierProducts: notSupported('network.getSupplierProducts'),
+      connect: notSupported('network.connect'),
+      disconnect: notSupported('network.disconnect'),
+      sync: notSupported('network.sync'),
+      getSupplierView: notSupported('network.getSupplierView'),
+    },
+
+    catalogue: {
+      search: notSupported('catalogue.search'),
+    },
+
+    importList: {
+      list: notSupported('importList.list'),
+      add: notSupported('importList.add'),
+      push: notSupported('importList.push') as HasznoClient['importList']['push'],
+    },
+
+    connections: {
+      list: notSupported('connections.list'),
+      get: notSupported('connections.get'),
+    },
+
+    peers: {
+      createInvite: notSupported('peers.createInvite'),
+      listInvites: notSupported('peers.listInvites'),
+      revokeInvite: notSupported('peers.revokeInvite'),
+      acceptInvite: notSupported('peers.acceptInvite'),
+      listLinks: notSupported('peers.listLinks'),
+      removeLink: notSupported('peers.removeLink'),
+      setVisibility: notSupported('peers.setVisibility'),
+    },
+
+    blog: {
+      list: notSupported('blog.list'),
+      get: notSupported('blog.get'),
+    },
+  }
+}
+
+/**
+ * Legacy client: behaviour byte-for-byte identical to the original createClient().
+ * Non-prefixed API key → x-api-key; Basic → Authorization: Basic.
+ */
+function createLegacyClient(opts: HttpOptions): HasznoClient {
   const o = opts
 
   return {
@@ -256,6 +467,7 @@ export function createClient(opts: HttpOptions = {}): HasznoClient {
       approve: (body) => post('/api/proposals/approve', body ?? {}, o),
       reject: (body) => post('/api/proposals/reject', body, o),
       rollback: (body) => post('/api/proposals/rollback', body, o),
+      propose: notSupported('proposals.propose (requires a shop API token)'),
     },
 
     automation: {
@@ -302,7 +514,6 @@ export function createClient(opts: HttpOptions = {}): HasznoClient {
         return get(`/api/import-list${suffix}`, o)
       },
       add: (body) => post('/api/import-list', body, o),
-      // Routes to the correct endpoint depending on whether a target connection is given.
       push: ((body: { ids: number[]; targetConnectionId?: number }) => {
         if (body.targetConnectionId != null) {
           return post<ConnectStorePushResult>(

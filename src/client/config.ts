@@ -1,13 +1,15 @@
 /**
  * Where the CLI gets its API URL and credentials from.
  *
- * Priority (highest first) — the same order the MCP server uses:
+ * Priority (highest first):
  *   1. explicit options (--api-url / --api-key flags)
- *   2. HASZNO_API_URL / HASZNO_API_KEY / HASZNO_BASIC environment variables
- *   3. ARFUTAR_* environment variables (silent fallback for migration)
- *   4. ~/.config/haszno/config.json (written by `haszno login`)
- *   5. ~/.config/arfutar/config.json (silent fallback for migration)
- *   6. https://haszno.com, no credentials
+ *   2. HASZNO_API_TOKEN (new, preferred for shop API tokens — starts with "haszno_")
+ *   3. HASZNO_API_URL / HASZNO_API_KEY / HASZNO_BASIC environment variables
+ *   4. ARFUTAR_* environment variables (silent fallback for migration)
+ *   5. ~/.config/haszno/config.json (written by `haszno login`)
+ *      A "haszno_"-prefixed apiKey saved here is also treated as a shop token.
+ *   6. ~/.config/arfutar/config.json (silent fallback for migration)
+ *   7. https://haszno.com, no credentials
  *
  * The config file is used as one unit: it is read only when neither a flag nor the environment
  * supplies credentials (so an environment key is never sent to a URL that only the file names),
@@ -97,7 +99,7 @@ export function resolveConnection(
   env: NodeJS.ProcessEnv = process.env,
   readConfig: () => HasznoConfig = readConfigFile,
 ): Connection {
-  let apiKey = nonEmpty(opts.apiKey) ?? nonEmpty(env['HASZNO_API_KEY']) ?? nonEmpty(env['ARFUTAR_API_KEY'])
+  let apiKey = nonEmpty(opts.apiKey) ?? nonEmpty(env['HASZNO_API_TOKEN']) ?? nonEmpty(env['HASZNO_API_KEY']) ?? nonEmpty(env['ARFUTAR_API_KEY'])
   let basicAuth = nonEmpty(opts.basicAuth) ?? nonEmpty(env['HASZNO_BASIC']) ?? nonEmpty(env['ARFUTAR_BASIC'])
   let baseUrl = nonEmpty(opts.baseUrl) ?? nonEmpty(env['HASZNO_API_URL']) ?? nonEmpty(env['ARFUTAR_API_URL'])
 
