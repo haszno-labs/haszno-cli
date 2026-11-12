@@ -1,24 +1,40 @@
 /**
- * CLI commands — proposals (price proposals).
+ * CLI commands — proposals (price proposals via agent endpoint).
  *
  * Domain: proposals
  * Subcommands:
- *   haszno proposals list [--status <s>]        list proposals (default: pending)
- *   haszno proposals show <id>                  show one proposal
- *   haszno proposals approve [--ids <ids>]      approve proposals (--yes required)
- *   haszno proposals reject --ids <ids>         reject proposals (--yes required)
- *   haszno proposals rollback --batch <batchId> roll back a batch (--yes required)
+ *   haszno proposals list              list pending proposals (agent endpoint, read-only)
+ *   haszno proposals show <id>         show one pending proposal (agent endpoint)
+ *   haszno proposals create            create a pending proposal (agent endpoint, write)
+ *   haszno proposals approve           NOT AVAILABLE with shop token
+ *   haszno proposals reject            NOT AVAILABLE with shop token
+ *   haszno proposals rollback          NOT AVAILABLE with shop token
  *
- * Writes need --yes; without it the command explains what would happen and exits 0.
+ * Uses GET /api/agent/proposals (AgentProposal[] — pending only).
+ * Fields available: id, productId, productName, productSku, oldPriceGross,
+ *   proposedPriceGross, reason, status, createdAt
+ * Fields NOT available via shop token: source, batchId, decidedAt
+ *
+ * Create uses POST /api/agent/proposals with an auto-generated nonce (crypto.randomUUID()).
+ * Approve/reject/rollback: human-only, return clear "not available" message.
+ *
  * Exit codes: 0 = ok, 1 = API/runtime error, 2 = usage error.
  */
+import { randomUUID } from 'node:crypto'
 import { Command } from 'commander'
-import type { HasznoClient, Proposal, ProposalStatus, ApproveResult, RollbackResult } from '../client/index.js'
+import type { HasznoClient, AgentProposal, CreateProposalResult } from '../client/index.js'
+import { HasznoApiError } from '../client/index.js'
+
+// ── constants ─────────────────────────────────────────────────────────────────
+
+const NOT_AVAILABLE_MSG =
+  'Nem elérhető bolt API-kulccsal. A jóváhagyás/elutasítás/visszagörgetés ' +
+  'emberi döntést igényel — használd a Haszno webes felületet (Árazás → Javaslatok).\n' +
+  'Ez szándékos: a bolt token csak PENDING javaslatot tud létrehozni.'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function isJsonMode(cmd: Command): boolean {
-  // Walk up to root to find the --json flag.
   let c: Command = cmd
   while (c.parent) c = c.parent
   return !!(c.opts<{ json?: boolean }>().json)
@@ -29,7 +45,10 @@ function printJson(data: unknown): void {
 }
 
 function fmtPrice(n: number): string {
-  return n.toLocaleString('hu-HU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' Ft'
+  // Replace non-breaking space ( ) used as thousands separator in hu-HU locale
+  // with a regular space for consistent output across environments.
+  return n.toLocaleString('hu-HU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+    .replace(/ /g, ' ') + ' Ft'
 }
 
 function fmtDate(s: string | null): string {
@@ -37,17 +56,7 @@ function fmtDate(s: string | null): string {
   return new Date(s).toLocaleDateString('hu-HU')
 }
 
-function statusLabel(s: ProposalStatus): string {
-  switch (s) {
-    case 'pending': return 'pending'
-    case 'approved': return 'approved'
-    case 'rejected': return 'rejected'
-    case 'rolled_back': return 'rolled_back'
-    default: return s
-  }
-}
-
-function printProposalTable(rows: Proposal[]): void {
+function printProposalTable(rows: AgentProposal[]): void {
   if (rows.length === 0) {
     process.stdout.write('Nincs találat.\n')
     return
@@ -57,13 +66,10 @@ function printProposalTable(rows: Proposal[]): void {
   const nameW = Math.min(28, Math.max(6, ...rows.map(r => (r.productName ?? '—').length)))
   const oldW = 12
   const newW = 12
-  const srcW = 10
-  const statusW = 11
   const dateW = 12
 
   function padR(s: string, w: number): string {
-    const t = s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length)
-    return t
+    return s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length)
   }
   function padL(s: string, w: number): string {
     return s.length >= w ? s.slice(0, w) : ' '.repeat(w - s.length) + s
@@ -74,9 +80,7 @@ function printProposalTable(rows: Proposal[]): void {
     padR('SKU', skuW) + '  ' +
     padR('Termék', nameW) + '  ' +
     padL('Régi ár', oldW) + '  ' +
-    padL('Új ár', newW) + '  ' +
-    padR('Forrás', srcW) + '  ' +
-    padR('Állapot', statusW) + '  ' +
+    padL('Javasolt', newW) + '  ' +
     padR('Dátum', dateW)
 
   process.stdout.write(header + '\n' + '-'.repeat(header.length) + '\n')
@@ -88,26 +92,39 @@ function printProposalTable(rows: Proposal[]): void {
       padR(r.productName ?? '—', nameW) + '  ' +
       padL(fmtPrice(r.oldPriceGross), oldW) + '  ' +
       padL(fmtPrice(r.proposedPriceGross), newW) + '  ' +
-      padR(r.source, srcW) + '  ' +
-      padR(statusLabel(r.status), statusW) + '  ' +
       padR(fmtDate(r.createdAt), dateW)
     process.stdout.write(line + '\n')
   }
 }
 
-function parseIds(raw: string): number[] {
-  return raw
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s => {
-      const n = Number(s)
-      if (!Number.isInteger(n) || n <= 0) throw new Error(`Érvénytelen ID: "${s}"`)
-      return n
-    })
+function handleApiError(err: unknown): void {
+  if (err instanceof HasznoApiError) {
+    switch (err.status) {
+      case 401:
+        console.error('Hiba: Érvénytelen, lejárt vagy visszavont API-kulcs. Hozz létre újat: Haszno → Integráció → API-kulcsok.')
+        break
+      case 403:
+        console.error('Hiba: A bolt token nem jogosult erre a műveletre. Ellenőrizd a token hatáskörét.')
+        break
+      case 404:
+        console.error('Hiba: A termék nem található a boltban. Csak saját termékazonosítóra lehet javaslatot tenni.')
+        break
+      case 409:
+        console.error('Hiba: Duplikált nonce — ez a javaslat már létezik. Az újra-futtatás automatikusan új nonce-t generál.')
+        break
+      case 429:
+        console.error('Hiba: Túl sok sikertelen kísérlet. Várj néhány percet.')
+        break
+      default:
+        console.error(`API hiba (${err.status}): ${err.message}`)
+    }
+  } else {
+    console.error('Váratlan hiba:', err instanceof Error ? err.message : String(err))
+  }
+  process.exit(1)
 }
 
-function die(msg: string, code = 1): never {
+function die(msg: string, code = 1): void {
   process.stderr.write(`Hiba: ${msg}\n`)
   process.exit(code)
 }
@@ -117,64 +134,50 @@ function die(msg: string, code = 1): never {
 export function registerProposalsCommands(program: Command, client: HasznoClient): void {
   const proposals = program
     .command('proposals')
-    .description('Árazási javaslatok kezelése (price proposals)')
+    .description('Árazási javaslatok kezelése (agent endpoint, bolt token)')
 
   // ── proposals list ──────────────────────────────────────────────────────
   proposals
     .command('list')
-    .description('Javaslatok listázása állapot szerint (alapértelmezett: pending)')
-    .option(
-      '-s, --status <status>',
-      'Szűrés állapotra: pending | approved | rejected | rolled_back',
-      'pending',
-    )
-    .action(async (opts: { status: string }, cmd: Command) => {
-      const allowedStatuses: ProposalStatus[] = ['pending', 'approved', 'rejected', 'rolled_back']
-      if (!allowedStatuses.includes(opts.status as ProposalStatus)) {
-        die(
-          `Érvénytelen állapot: "${opts.status}". Lehetséges értékek: ${allowedStatuses.join(', ')}`,
-          2,
-        )
-      }
-
-      let rows: Proposal[]
+    .description('Függő (pending) javaslatok listázása')
+    .action(async (_opts: unknown, cmd: Command) => {
+      let rows: AgentProposal[]
       try {
-        rows = await client.proposals.list({ status: opts.status as ProposalStatus })
+        rows = await client.agent.proposals()
       } catch (err) {
-        die(err instanceof Error ? err.message : String(err))
+        handleApiError(err)
+        return
       }
 
       if (isJsonMode(cmd)) {
         printJson(rows)
       } else {
         printProposalTable(rows)
-        process.stdout.write(`\nÖsszesen: ${rows.length} javaslat\n`)
+        process.stdout.write(`\nÖsszesen: ${rows.length} függő javaslat\n`)
+        if (rows.length > 0) {
+          process.stdout.write('(Jóváhagyáshoz: Haszno webes felület → Árazás → Javaslatok)\n')
+        }
       }
     })
 
   // ── proposals show ──────────────────────────────────────────────────────
   proposals
     .command('show <id>')
-    .description('Egy javaslat részletei ID alapján')
+    .description('Egy függő javaslat részletei ID alapján')
     .action(async (idStr: string, _opts: unknown, cmd: Command) => {
       const id = Number(idStr)
-      if (!Number.isInteger(id) || id <= 0) die(`Érvénytelen ID: "${idStr}"`, 2)
+      if (!Number.isInteger(id) || id <= 0) { die(`Érvénytelen ID: "${idStr}"`, 2); return }
 
-      let row: Proposal | undefined
+      let rows: AgentProposal[]
       try {
-        // API has no single-proposal endpoint; search across all statuses.
-        const all = await Promise.all([
-          client.proposals.list({ status: 'pending' }),
-          client.proposals.list({ status: 'approved' }),
-          client.proposals.list({ status: 'rejected' }),
-          client.proposals.list({ status: 'rolled_back' }),
-        ])
-        row = all.flat().find(r => r.id === id)
+        rows = await client.agent.proposals()
       } catch (err) {
-        die(err instanceof Error ? err.message : String(err))
+        handleApiError(err)
+        return
       }
 
-      if (!row) die(`Nem található javaslat ID=${id}`, 1)
+      const row = rows.find(r => r.id === id)
+      if (!row) { die(`Nem található függő javaslat ID=${id}. Csak pending javaslatok elérhetők bolt tokennel.`, 1); return }
 
       if (isJsonMode(cmd)) {
         printJson(row)
@@ -186,11 +189,62 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
           `Régi ár:     ${fmtPrice(row.oldPriceGross)}\n` +
           `Javasolt ár: ${fmtPrice(row.proposedPriceGross)}\n` +
           `Ok:          ${row.reason}\n` +
-          `Forrás:      ${row.source}\n` +
-          `Állapot:     ${statusLabel(row.status)}\n` +
-          `Batch ID:    ${row.batchId ?? '—'}\n` +
-          `Létrehozva:  ${fmtDate(row.createdAt)}\n` +
-          `Eldöntve:    ${fmtDate(row.decidedAt)}\n`,
+          `Állapot:     ${row.status}\n` +
+          `Létrehozva:  ${fmtDate(row.createdAt)}\n`,
+        )
+      }
+    })
+
+  // ── proposals create ────────────────────────────────────────────────────
+  proposals
+    .command('create')
+    .description('Új árazási javaslat létrehozása (pending — jóváhagyás a webes felületen)')
+    .requiredOption('--product-id <id>', 'Termék ID (egész szám)')
+    .requiredOption('--price <ft>', 'Javasolt bruttó ár (egész Ft)')
+    .requiredOption('--reason <szoveg>', 'Az árazás indoklása (1–500 karakter)')
+    .option('--yes', 'Megerősítés kihagyása')
+    .action(async (opts: { productId: string; price: string; reason: string; yes?: boolean }, cmd: Command) => {
+      const productId = Number(opts.productId)
+      if (!Number.isInteger(productId) || productId <= 0) { die(`Érvénytelen termék ID: "${opts.productId}"`, 2); return }
+
+      const proposedPriceGross = Number(opts.price)
+      if (!Number.isInteger(proposedPriceGross) || proposedPriceGross <= 0) { die(`Az ár egész pozitív szám kell legyen: "${opts.price}"`, 2); return }
+
+      const reason = opts.reason.trim()
+      if (reason.length < 1 || reason.length > 500) { die('Az indoklás 1–500 karakter lehet.', 2); return }
+
+      if (!opts.yes && process.stdin.isTTY) {
+        const { createInterface } = await import('readline')
+        const rl = createInterface({ input: process.stdin, output: process.stdout })
+        const answer = await new Promise<string>((resolve) => {
+          rl.question(
+            `Javaslatot adsz be: termék #${productId}, ár: ${fmtPrice(proposedPriceGross)}, ok: "${reason}".\nFolytatod? [i/n] `,
+            (a) => { rl.close(); resolve(a.trim().toLowerCase()) },
+          )
+        })
+        if (answer !== 'i') {
+          console.log('Megszakítva.')
+          process.exit(0)
+        }
+      }
+
+      const nonce = randomUUID()
+      let result: CreateProposalResult
+      try {
+        result = await client.agent.createProposal({ productId, proposedPriceGross, reason, nonce })
+      } catch (err) {
+        handleApiError(err)
+        return
+      }
+
+      if (isJsonMode(cmd)) {
+        printJson({ ...result, nonce })
+      } else {
+        process.stdout.write(
+          `Javaslat létrehozva (ID: ${result.id})\n` +
+          `Állapot:     ${result.status}\n` +
+          `Létrehozva:  ${fmtDate(result.createdAt)}\n` +
+          `(Jóváhagyáshoz: Haszno webes felület → Árazás → Javaslatok)\n`,
         )
       }
     })
@@ -198,110 +252,33 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
   // ── proposals approve ───────────────────────────────────────────────────
   proposals
     .command('approve')
-    .description(
-      'Javaslatok jóváhagyása. --ids nélkül az összes pending javaslat jóváhagyódik.',
-    )
-    .option('--ids <ids>', 'Vesszővel elválasztott ID-k (pl. 1,2,3); ha nincs: az összes pending')
-    .option('--yes', 'Megerősítés kihagyása (kötelező automatizáláshoz)')
-    .action(async (opts: { ids?: string; yes?: boolean }, cmd: Command) => {
-      let ids: number[] | undefined
-      if (opts.ids) {
-        try {
-          ids = parseIds(opts.ids)
-        } catch (err) {
-          die(err instanceof Error ? err.message : String(err), 2)
-        }
-      }
-
-      if (!opts.yes) {
-        const target = ids ? `ID: ${ids.join(', ')}` : 'az összes függő javaslat'
-        process.stdout.write(
-          `[DRY-RUN] Jóváhagyásra kerülne: ${target}.\n` +
-            `Futtatás végrehajtáshoz add meg a --yes kapcsolót.\n`,
-        )
-        process.exit(0)
-      }
-
-      let result: ApproveResult
-      try {
-        result = await client.proposals.approve(ids ? { ids } : {})
-      } catch (err) {
-        die(err instanceof Error ? err.message : String(err))
-      }
-
-      if (isJsonMode(cmd)) {
-        printJson(result)
-      } else {
-        process.stdout.write(
-          `Jóváhagyva: ${result.applied} javaslat` +
-            (result.batchId ? ` (batch: ${result.batchId})` : '') +
-            '\n',
-        )
-      }
+    .description('Javaslatok jóváhagyása — NEM ELÉRHETŐ bolt API-kulccsal')
+    .option('--ids <ids>', 'ID-k')
+    .option('--yes', 'Megerősítés kihagyása')
+    .action(async () => {
+      console.error(NOT_AVAILABLE_MSG)
+      process.exit(1)
     })
 
   // ── proposals reject ────────────────────────────────────────────────────
   proposals
     .command('reject')
-    .description('Javaslatok elutasítása (kötelező: --ids)')
-    .requiredOption('--ids <ids>', 'Vesszővel elválasztott ID-k (pl. 1,2,3)')
-    .option('--yes', 'Megerősítés kihagyása (kötelező automatizáláshoz)')
-    .action(async (opts: { ids: string; yes?: boolean }, cmd: Command) => {
-      let ids: number[]
-      try {
-        ids = parseIds(opts.ids)
-      } catch (err) {
-        die(err instanceof Error ? err.message : String(err), 2)
-      }
-
-      if (!opts.yes) {
-        process.stdout.write(
-          `[DRY-RUN] Elutasításra kerülne: ID ${ids.join(', ')}.\n` +
-            `Futtatás végrehajtáshoz add meg a --yes kapcsolót.\n`,
-        )
-        process.exit(0)
-      }
-
-      let result: { rejected: number }
-      try {
-        result = await client.proposals.reject({ ids })
-      } catch (err) {
-        die(err instanceof Error ? err.message : String(err))
-      }
-
-      if (isJsonMode(cmd)) {
-        printJson(result)
-      } else {
-        process.stdout.write(`Elutasítva: ${result.rejected} javaslat\n`)
-      }
+    .description('Javaslatok elutasítása — NEM ELÉRHETŐ bolt API-kulccsal')
+    .option('--ids <ids>', 'ID-k')
+    .option('--yes', 'Megerősítés kihagyása')
+    .action(async () => {
+      console.error(NOT_AVAILABLE_MSG)
+      process.exit(1)
     })
 
   // ── proposals rollback ──────────────────────────────────────────────────
   proposals
     .command('rollback')
-    .description('Egy jóváhagyott batch visszagörgetése')
-    .requiredOption('--batch <batchId>', 'A visszagörgetendő batch ID (approve adja vissza)')
-    .option('--yes', 'Megerősítés kihagyása (kötelező automatizáláshoz)')
-    .action(async (opts: { batch: string; yes?: boolean }, cmd: Command) => {
-      if (!opts.yes) {
-        process.stdout.write(
-          `[DRY-RUN] Visszagörgetésre kerülne: batch "${opts.batch}".\n` +
-            `Futtatás végrehajtáshoz add meg a --yes kapcsolót.\n`,
-        )
-        process.exit(0)
-      }
-
-      let result: RollbackResult
-      try {
-        result = await client.proposals.rollback({ batchId: opts.batch })
-      } catch (err) {
-        die(err instanceof Error ? err.message : String(err))
-      }
-
-      if (isJsonMode(cmd)) {
-        printJson(result)
-      } else {
-        process.stdout.write(`Visszagörgetett javaslatok: ${result.rolledBack}\n`)
-      }
+    .description('Batch visszagörgetése — NEM ELÉRHETŐ bolt API-kulccsal')
+    .option('--batch <batchId>', 'Batch ID')
+    .option('--yes', 'Megerősítés kihagyása')
+    .action(async () => {
+      console.error(NOT_AVAILABLE_MSG)
+      process.exit(1)
     })
 }

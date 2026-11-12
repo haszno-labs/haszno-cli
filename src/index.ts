@@ -2,18 +2,22 @@
  * @haszno/cli — Haszno command-line interface.
  *
  * Global flags:
- *   --json          print machine-readable JSON instead of human tables
- *   --api-url <url> override HASZNO_API_URL
- *   --api-key <key> override HASZNO_API_KEY
+ *   --json             print machine-readable JSON instead of human tables
+ *   --api-url <url>    override HASZNO_API_URL
+ *   --api-key <token>  override token (sent as Authorization: Bearer)
+ *
+ * Authentication (in priority order):
+ *   --api-key <token>  → Authorization: Bearer <token>
+ *   HASZNO_API_TOKEN   → per-shop Bearer token (canonical, Haszno → Integráció → API-kulcsok)
+ *   HASZNO_API_KEY     → legacy alias for HASZNO_API_TOKEN (silent migration)
+ *   HASZNO_BASIC       → HTTP Basic auth (session-based endpoints only)
  *
  * Usage examples:
- *   haszno login
- *   haszno account stats
  *   haszno products list --json
  *   haszno proposals list
- *   haszno proposals approve --ids 1,2,3
+ *   haszno proposals create --product-id 42 --price 8900 --reason "Verseny csökkentett"
+ *   haszno orders list
  *   haszno rules list
- *   haszno rules run 2
  */
 import { Command } from 'commander'
 import { createClient } from './client/index.js'

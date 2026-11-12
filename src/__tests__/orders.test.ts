@@ -1,40 +1,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Command } from 'commander'
-import type { HasznoClient, Order } from '../client/index.js'
+import type { HasznoClient, AgentOrder } from '../client/index.js'
 import { registerOrdersCommands } from '../commands/orders.js'
 
 // ---- fixtures ---------------------------------------------------------------
 
-const orderReceived: Order = {
+const orderReceived: AgentOrder = {
   id: 1,
   externalId: 'EXT-001',
   customerName: 'Kiss Péter',
-  address: '1234 Budapest, Fő utca 1.',
   status: 'received',
-  supplierOrderId: null,
-  trackingNumber: null,
   totalGross: 25000,
-  events: [{ at: '2024-01-15T10:00:00Z', text: 'Rendelés megérkezett' }],
   createdAt: '2024-01-15T10:00:00Z',
   items: [
     { orderId: 1, qty: 2, priceGross: 12500, name: 'Teszt Termék', sku: 'SKU-001' },
   ],
 }
 
-const orderShipped: Order = {
+const orderShipped: AgentOrder = {
   id: 2,
   externalId: 'EXT-002',
   customerName: 'Nagy Anna',
-  address: '5678 Győr, Kossuth tér 5.',
   status: 'shipped',
-  supplierOrderId: 'SUPP-42',
-  trackingNumber: 'TRK123456',
   totalGross: 8900,
-  events: [
-    { at: '2024-01-16T09:00:00Z', text: 'Rendelés megérkezett' },
-    { at: '2024-01-16T14:00:00Z', text: 'Továbbítva a szállítóhoz' },
-    { at: '2024-01-17T08:00:00Z', text: 'Feladva' },
-  ],
   createdAt: '2024-01-16T09:00:00Z',
   items: [
     { orderId: 2, qty: 1, priceGross: 8900, name: 'Másik Termék', sku: 'SKU-002' },
@@ -43,16 +31,19 @@ const orderShipped: Order = {
 
 // ---- mock client ------------------------------------------------------------
 
-function makeClient(overrides: Partial<HasznoClient['orders']> = {}): HasznoClient {
+function makeClient(): HasznoClient {
   return {
+    agent: {
+      orders: vi.fn(() => Promise.resolve([orderReceived, orderShipped])),
+      products: vi.fn(),
+      proposals: vi.fn(),
+      createProposal: vi.fn(),
+    },
     orders: {
-      list: vi.fn(() => Promise.resolve([orderReceived, orderShipped])),
-      ship: vi.fn((id: number) =>
-        Promise.resolve({ ...orderReceived, id, status: 'shipped' as const }),
-      ),
-      createDemo: vi.fn(() => Promise.resolve({ id: 99 })),
-      receiveOrder: vi.fn(() => Promise.resolve({ id: 100 })),
-      ...overrides,
+      list: vi.fn(),
+      ship: vi.fn(),
+      createDemo: vi.fn(),
+      receiveOrder: vi.fn(),
     },
   } as unknown as HasznoClient
 }
@@ -91,12 +82,12 @@ function silenceConsole() {
 describe('orders list', () => {
   silenceConsole()
 
-  it('calls client.orders.list() and prints a table by default', async () => {
+  it('calls client.agent.orders() — not client.orders.list()', async () => {
     const client = makeClient()
     const program = buildProgram(client)
     await program.parseAsync(['node', 'haszno', 'orders', 'list'])
-    expect(client.orders.list).toHaveBeenCalledOnce()
-    expect(console.log).toHaveBeenCalled()
+    expect(client.agent.orders).toHaveBeenCalledOnce()
+    expect(client.orders.list).not.toHaveBeenCalled()
   })
 
   it('--json emits JSON array to stdout', async () => {
@@ -117,7 +108,7 @@ describe('orders list', () => {
     const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await program.parseAsync(['node', 'haszno', '--json', 'orders', 'list', '--status', 'received'])
     const output = writeSpy.mock.calls.map(([s]) => s).join('')
-    const parsed: Order[] = JSON.parse(output)
+    const parsed: AgentOrder[] = JSON.parse(output)
     expect(parsed.every((o) => o.status === 'received')).toBe(true)
     writeSpy.mockRestore()
   })
@@ -128,7 +119,7 @@ describe('orders list', () => {
     const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await program.parseAsync(['node', 'haszno', '--json', 'orders', 'list', '--status', 'shipped'])
     const output = writeSpy.mock.calls.map(([s]) => s).join('')
-    const parsed: Order[] = JSON.parse(output)
+    const parsed: AgentOrder[] = JSON.parse(output)
     expect(parsed.every((o) => o.status === 'shipped')).toBe(true)
     writeSpy.mockRestore()
   })
@@ -144,9 +135,8 @@ describe('orders list', () => {
   })
 
   it('API error exits with code 1', async () => {
-    const client = makeClient({
-      list: vi.fn(() => Promise.reject(new Error('connection refused'))),
-    })
+    const client = makeClient()
+    vi.mocked(client.agent.orders).mockRejectedValue(new Error('connection refused'))
     const program = buildProgram(client)
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error(`exit:${_code}`) })
     await expect(
@@ -156,7 +146,8 @@ describe('orders list', () => {
   })
 
   it('empty list prints a friendly message', async () => {
-    const client = makeClient({ list: vi.fn(() => Promise.resolve([])) })
+    const client = makeClient()
+    vi.mocked(client.agent.orders).mockResolvedValue([])
     const program = buildProgram(client)
     await program.parseAsync(['node', 'haszno', 'orders', 'list'])
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Nincs'))
@@ -166,23 +157,33 @@ describe('orders list', () => {
 describe('orders show', () => {
   silenceConsole()
 
+  it('calls client.agent.orders() — not client.orders.list()', async () => {
+    const client = makeClient()
+    const program = buildProgram(client)
+    await program.parseAsync(['node', 'haszno', 'orders', 'show', '1'])
+    expect(client.agent.orders).toHaveBeenCalledOnce()
+    expect(client.orders.list).not.toHaveBeenCalled()
+  })
+
   it('finds and prints one order by ID', async () => {
     const client = makeClient()
     const program = buildProgram(client)
     await program.parseAsync(['node', 'haszno', 'orders', 'show', '1'])
-    expect(client.orders.list).toHaveBeenCalledOnce()
     expect(console.log).toHaveBeenCalled()
   })
 
-  it('--json emits a single Order object', async () => {
+  it('--json emits a single AgentOrder object without address or tracking', async () => {
     const client = makeClient()
     const program = buildProgram(client)
     const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await program.parseAsync(['node', 'haszno', '--json', 'orders', 'show', '2'])
     const output = writeSpy.mock.calls.map(([s]) => s).join('')
-    const parsed: Order = JSON.parse(output)
+    const parsed: AgentOrder = JSON.parse(output)
     expect(parsed.id).toBe(2)
-    expect(parsed.trackingNumber).toBe('TRK123456')
+    expect(parsed.status).toBe('shipped')
+    // These fields are NOT in AgentOrder (shop token endpoint omits them)
+    expect(parsed).not.toHaveProperty('trackingNumber')
+    expect(parsed).not.toHaveProperty('address')
     writeSpy.mockRestore()
   })
 
@@ -207,107 +208,38 @@ describe('orders show', () => {
   })
 })
 
+// ── orders ship — NOT AVAILABLE with shop token ───────────────────────────────
+
 describe('orders ship', () => {
   silenceConsole()
 
-  it('calls client.orders.ship() with --yes flag', async () => {
+  it('prints NOT_AVAILABLE message and exits 1 — does not call client.orders.ship()', async () => {
     const client = makeClient()
-    const program = buildProgram(client)
-    await program.parseAsync(['node', 'haszno', 'orders', 'ship', '1', '--yes'])
-    expect(client.orders.ship).toHaveBeenCalledWith(1)
-  })
-
-  it('--json emits the updated order', async () => {
-    const client = makeClient()
-    const program = buildProgram(client)
-    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await program.parseAsync(['node', 'haszno', '--json', 'orders', 'ship', '1', '--yes'])
-    const output = writeSpy.mock.calls.map(([s]) => s).join('')
-    const parsed: Order = JSON.parse(output)
-    expect(parsed.status).toBe('shipped')
-    writeSpy.mockRestore()
-  })
-
-  it('API error exits with code 1', async () => {
-    const client = makeClient({
-      ship: vi.fn(() => Promise.reject(new Error('server error'))),
-    })
     const program = buildProgram(client)
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error(`exit:${_code}`) })
     await expect(
       program.parseAsync(['node', 'haszno', 'orders', 'ship', '1', '--yes']),
     ).rejects.toThrow('exit:1')
-    exitSpy.mockRestore()
-  })
-
-  it('non-numeric ID exits with code 2', async () => {
-    const client = makeClient()
-    const program = buildProgram(client)
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error(`exit:${_code}`) })
-    await expect(
-      program.parseAsync(['node', 'haszno', 'orders', 'ship', 'abc', '--yes']),
-    ).rejects.toThrow('exit:2')
-    exitSpy.mockRestore()
-  })
-
-  it('without --yes in non-TTY env cancels without calling ship()', async () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
-    const client = makeClient()
-    const program = buildProgram(client)
-    // process.exit(0) = clean exit; mock it so test doesn't hang
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error(`exit:${_code}`) })
-    await expect(
-      program.parseAsync(['node', 'haszno', 'orders', 'ship', '1']),
-    ).rejects.toThrow('exit:0')
     expect(client.orders.ship).not.toHaveBeenCalled()
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('bolt API-kulccsal'))
     exitSpy.mockRestore()
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
   })
 })
+
+// ── orders demo — NOT AVAILABLE with shop token ───────────────────────────────
 
 describe('orders demo', () => {
   silenceConsole()
 
-  it('calls client.orders.createDemo() with --yes flag', async () => {
+  it('prints NOT_AVAILABLE message and exits 1 — does not call client.orders.createDemo()', async () => {
     const client = makeClient()
-    const program = buildProgram(client)
-    await program.parseAsync(['node', 'haszno', 'orders', 'demo', '--yes'])
-    expect(client.orders.createDemo).toHaveBeenCalledOnce()
-  })
-
-  it('--json emits the created order id', async () => {
-    const client = makeClient()
-    const program = buildProgram(client)
-    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await program.parseAsync(['node', 'haszno', '--json', 'orders', 'demo', '--yes'])
-    const output = writeSpy.mock.calls.map(([s]) => s).join('')
-    const parsed = JSON.parse(output)
-    expect(parsed.id).toBe(99)
-    writeSpy.mockRestore()
-  })
-
-  it('API error exits with code 1', async () => {
-    const client = makeClient({
-      createDemo: vi.fn(() => Promise.reject(new Error('demo not available'))),
-    })
     const program = buildProgram(client)
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error(`exit:${_code}`) })
     await expect(
       program.parseAsync(['node', 'haszno', 'orders', 'demo', '--yes']),
     ).rejects.toThrow('exit:1')
-    exitSpy.mockRestore()
-  })
-
-  it('without --yes in non-TTY env cancels without calling createDemo()', async () => {
-    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
-    const client = makeClient()
-    const program = buildProgram(client)
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code) => { throw new Error(`exit:${_code}`) })
-    await expect(
-      program.parseAsync(['node', 'haszno', 'orders', 'demo']),
-    ).rejects.toThrow('exit:0')
     expect(client.orders.createDemo).not.toHaveBeenCalled()
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('bolt API-kulccsal'))
     exitSpy.mockRestore()
-    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true })
   })
 })

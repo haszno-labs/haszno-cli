@@ -75,25 +75,30 @@ haszno products list --json | jq '.[] | .name'
 |---|---|
 | `--json` | Gépi olvasható JSON kimenet |
 | `--api-url <url>` | API URL felülírása (env: `HASZNO_API_URL`) |
-| `--api-key <key>` | API kulcs felülírása (env: `HASZNO_API_KEY`) |
+| `--api-key <token>` | Bearer token felülírása (env: `HASZNO_API_TOKEN`) |
 
 ### Parancsok áttekintése
 
-| Parancs | Leírás |
-|---|---|
-| `haszno login` | Bejelentkezés, konfig mentése |
-| `haszno account ping` | API kapcsolat ellenőrzése |
-| `haszno account stats` | Irányítópult összefoglaló |
-| `haszno account impact` | Haszon-mérő |
-| `haszno products list` | Termékek listázása |
-| `haszno products apply-prices --yes` | Ajánlott árak alkalmazása |
-| `haszno proposals list` | Árazási javaslatok |
-| `haszno proposals approve --yes` | Összes függő javaslat jóváhagyása |
-| `haszno rules list` | Automatizálási szabályok |
-| `haszno rules run <id> --yes` | Szabály manuális futtatása |
-| `haszno feeds import-supplier ...` | Szállítói feed import |
-| `haszno ideas list` | AI termékötletek |
-| `haszno orders list` | Rendelések |
+| Parancs | Leírás | Bolt token |
+|---|---|---|
+| `haszno products list` | Termékek listázása marginnal | ✅ |
+| `haszno products show <id>` | Termék részletei | ✅ |
+| `haszno products apply-prices --yes` | Ajánlott árak alkalmazása | ❌ session |
+| `haszno proposals list` | **Függő** javaslatok listája | ✅ |
+| `haszno proposals create --product-id N --price N --reason "..." --yes` | Új pending javaslat | ✅ |
+| `haszno proposals approve --yes` | Javaslatok jóváhagyása | ❌ session |
+| `haszno proposals reject --ids N --yes` | Javaslatok elutasítása | ❌ session |
+| `haszno proposals rollback --batch B --yes` | Köteg visszavonása | ❌ session |
+| `haszno orders list` | Utolsó 20 rendelés | ✅ |
+| `haszno orders show <id>` | Rendelés tételekkel | ✅ |
+| `haszno orders ship <id> --yes` | Szállítottnak jelöl | ❌ session |
+| `haszno rules list` | Automatizálási szabályok | ✅ |
+| `haszno rules run <id> --yes` | Szabály manuális futtatása | ❌ session |
+| `haszno feeds import-supplier ...` | Szállítói feed import | ❌ session |
+| `haszno ideas list` | AI termékötletek | ✅ |
+
+> **Bolt token** = per-bolt Bearer token (Haszno → Integráció → API-kulcsok).
+> Session-only műveletek `HASZNO_BASIC` (HTTP Basic) autentikációt igényelnek.
 
 ---
 
@@ -101,11 +106,24 @@ haszno products list --json | jq '.[] | .name'
 
 ### Prioritási sorrend (magasabbtól alacsonyabbig)
 
-1. `--api-url` / `--api-key` parancssori jelzők
-2. `HASZNO_API_URL` / `HASZNO_API_KEY` környezeti változók
-3. `~/.config/haszno/config.json` konfigurációs fájl (írja a `haszno login`)
-4. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (visszafelé kompatibilis fallback)
-5. `~/.config/arfutar/config.json` (visszafelé kompatibilis fallback)
+1. `--api-key <token>` parancssori jelző → `Authorization: Bearer <token>`-ként küldődik
+2. `HASZNO_API_TOKEN` — per-bolt Bearer token (**elsődleges**; létrehozás: Haszno → Integráció → API-kulcsok)
+3. `HASZNO_API_KEY` — `HASZNO_API_TOKEN` örökös aliasza (csendes migráció; azonos kezelés)
+4. `HASZNO_BASIC` — HTTP Basic auth (csak session-alapú végpontokhoz)
+5. `~/.config/haszno/config.json` konfigurációs fájl (írja a `haszno login`)
+6. `ARFUTAR_API_KEY` / `ARFUTAR_API_URL` (visszafelé kompatibilis fallback)
+7. `~/.config/arfutar/config.json` (visszafelé kompatibilis fallback)
+
+### API-kulcs létrehozása
+
+1. Lépj be a [haszno.com](https://haszno.com) → **Integráció → API-kulcsok** oldalra
+2. Kattints az **Új API-kulcs** gombra, adj nevet, válaszd az **agent** hatáskört
+3. Másold ki a `haszno_…` tokent — csak egyszer látható
+4. `export HASZNO_API_TOKEN=haszno_…`
+
+> **A jóváhagyás szándékosan emberi feladat.** A bolt token olvashatja a termékeket,
+> rendeléseket és javaslatokat, és létrehozhat pending javaslatot. A jóváhagyás /
+> elutasítás / visszagörgetés csak webes felületen érhető el.
 
 ### Konfigurációs fájl formátuma
 

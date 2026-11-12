@@ -1,21 +1,30 @@
 /**
- * CLI commands — products (own shop products & pricing).
+ * CLI commands — products (own shop products via agent endpoint).
  *
  * Subcommands:
- *   haszno products list [--all] [--losing] [--over-market] [--cats <nevek>]
- *   haszno products show <id>
- *   haszno products update <id> [--market-min <ft>] [--market-shop <nev>] [--price <ft>] [--yes]
- *   haszno products listing <id> --on|--off [--yes]
- *   haszno products apply-prices [--ids <ids>] [--yes]
- *   haszno products describe <id> [--yes]
- *   haszno products stats
- *   haszno products impact [--days <n>]
+ *   haszno products list [--losing] [--cats <nevek>]       (agent endpoint, read-only)
+ *   haszno products show <id>                              (agent endpoint, read-only)
+ *   haszno products update <id> ...                        NOT AVAILABLE with shop token
+ *   haszno products listing <id> --on|--off                NOT AVAILABLE with shop token
+ *   haszno products apply-prices ...                       NOT AVAILABLE with shop token
+ *   haszno products describe <id>                          NOT AVAILABLE with shop token
+ *   haszno products stats                                  NOT AVAILABLE with shop token
+ *   haszno products impact [--days <n>]                    NOT AVAILABLE with shop token
+ *
+ * Uses GET /api/agent/products (AgentProduct[]).
+ * Fields available: id, sku, name, listed, priceGross, stock, supplierName,
+ *   current: {priceGross, marginNet, marginPct}, recommended: {priceGross, marginNet, marginPct}
+ * Fields NOT available via shop token: costNet, marketMinGross, marketShop, updatedAt, rrpGross.
  *
  * Exit codes: 0 OK, 1 runtime error, 2 usage/validation error.
  */
 import readline from 'node:readline'
 import type { Command } from 'commander'
-import type { HasznoClient, Product } from '../client/index.js'
+import type { HasznoClient, AgentProduct } from '../client/index.js'
+
+const NOT_AVAILABLE_MSG =
+  'Nem elérhető bolt API-kulccsal. Ez a művelet session tokent (webes bejelentkezést) igényel.\n' +
+  'Használd a Haszno webes felületet a végrehajtáshoz.'
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -45,10 +54,9 @@ function printTable(headers: string[], rows: string[][], widths: number[]): void
   }
 }
 
-/** Human-readable price status for a product. */
-function statusLabel(p: Product): string {
+/** Human-readable price status for an agent product (no costNet, no marketMinGross). */
+function statusLabel(p: AgentProduct): string {
   if (p.current.marginPct < 0) return 'VESZTESÉGES'
-  if (p.marketMinGross !== null && p.priceGross > p.marketMinGross) return 'PIAC FELETT'
   if (!p.listed) return 'nincs listán'
   return 'OK'
 }
@@ -69,12 +77,8 @@ export async function askConfirm(question: string): Promise<boolean> {
 // ── Handlers (exported for unit testing) ─────────────────────────────────────
 
 export interface ListOpts {
-  /** Include all products, not just listed ones. */
-  all?: boolean
   /** Filter to products with negative current margin. */
   losing?: boolean
-  /** Filter to products priced above the market minimum. */
-  overMarket?: boolean
   /**
    * Comma-separated supplier name fragments to match (case-insensitive).
    * Example: --cats "auto,kert" shows products from suppliers whose name
@@ -85,10 +89,10 @@ export interface ListOpts {
 }
 
 export async function cmdList(client: HasznoClient, opts: ListOpts): Promise<void> {
-  let rows = await client.products.list({ all: opts.all })
+  let rows = await client.agent.products()
 
   if (opts.losing) rows = rows.filter(p => p.current.marginPct < 0)
-  if (opts.overMarket) rows = rows.filter(p => p.marketMinGross !== null && p.priceGross > p.marketMinGross)
+  // Note: --over-market is not supported (marketMinGross not returned by shop token endpoint)
   if (opts.cats) {
     const cats = opts.cats.toLowerCase().split(',').map(c => c.trim()).filter(Boolean)
     rows = rows.filter(p => cats.some(c => p.supplierName.toLowerCase().includes(c)))
@@ -105,19 +109,18 @@ export async function cmdList(client: HasznoClient, opts: ListOpts): Promise<voi
   }
 
   printTable(
-    ['ID', 'SKU', 'Termék', 'Beszer.', 'Ár (Ft)', 'Piac min', 'Ajánlott', 'Marzs', 'Státusz'],
+    ['ID', 'SKU', 'Termék', 'Ár (Ft)', 'Ajánlott', 'Marzs', 'Készlet', 'Státusz'],
     rows.map(p => [
       String(p.id),
       p.sku.slice(0, 18),
       p.name.slice(0, 30),
-      fmtFt(p.costNet),
       fmtFt(p.priceGross),
-      p.marketMinGross !== null ? fmtFt(p.marketMinGross) : '–',
       fmtFt(p.recommended.priceGross),
       fmtPct(p.current.marginPct),
+      String(p.stock),
       statusLabel(p),
     ]),
-    [5, 18, 30, 11, 11, 11, 11, 7, 12],
+    [5, 18, 30, 11, 11, 7, 7, 12],
   )
   console.log(`\n${rows.length} termék`)
 }
@@ -127,7 +130,7 @@ export interface ShowOpts {
 }
 
 export async function cmdShow(client: HasznoClient, id: number, opts: ShowOpts): Promise<void> {
-  const products = await client.products.list({ all: true })
+  const products = await client.agent.products()
   const p = products.find(x => x.id === id)
   if (!p) {
     console.error(`Nem található termék: ${id}`)
@@ -144,15 +147,13 @@ export async function cmdShow(client: HasznoClient, id: number, opts: ShowOpts):
   console.log(`SKU:           ${p.sku}`)
   console.log(`Neve:          ${p.name}`)
   console.log(`Beszállító:    ${p.supplierName}`)
-  console.log(`Beszerzési ár: ${fmtFt(p.costNet)} (nettó)`)
   console.log(`Eladási ár:    ${fmtFt(p.priceGross)} (bruttó)`)
-  console.log(`Piaci min:     ${p.marketMinGross !== null ? fmtFt(p.marketMinGross) : '–'}${p.marketShop ? ` (${p.marketShop})` : ''}`)
   console.log(`Ajánlott ár:   ${fmtFt(p.recommended.priceGross)}`)
   console.log(`Marzs (aktu):  ${fmtPct(p.current.marginPct)} (${fmtFt(p.current.marginNet)} nettó)`)
   console.log(`Marzs (ajánl): ${fmtPct(p.recommended.marginPct)} (${fmtFt(p.recommended.marginNet)} nettó)`)
   console.log(`Készlet:       ${p.stock}`)
   console.log(`Listán:        ${p.listed ? 'igen' : 'nem'}`)
-  console.log(`Frissítve:     ${fmtDate(p.updatedAt)}`)
+  // Note: costNet, marketMinGross, marketShop, updatedAt are not available via shop token
 }
 
 export interface UpdateOpts {
@@ -168,33 +169,9 @@ export interface UpdateOpts {
   confirm?: () => Promise<boolean>
 }
 
-export async function cmdUpdate(client: HasznoClient, id: number, opts: UpdateOpts): Promise<void> {
-  const body: { marketMinGross?: number | null; marketShop?: string | null; priceGross?: number } = {}
-  if (opts.marketMin !== undefined) body.marketMinGross = opts.marketMin === 'null' ? null : Number(opts.marketMin)
-  if (opts.marketShop !== undefined) body.marketShop = opts.marketShop === 'null' ? null : opts.marketShop
-  if (opts.price !== undefined) body.priceGross = Number(opts.price)
-
-  if (Object.keys(body).length === 0) {
-    console.error('Legalább egy mezőt meg kell adni: --market-min, --market-shop vagy --price')
-    process.exitCode = 2
-    return
-  }
-
-  if (!opts.yes) {
-    const confirmFn = opts.confirm ?? (() => askConfirm(`Frissíti a termék #${id} adatait?`))
-    const ok = await confirmFn()
-    if (!ok) { console.log('Megszakítva.'); return }
-  }
-
-  const updated = await client.products.update(id, body)
-  if (opts.json) {
-    console.log(JSON.stringify(updated, null, 2))
-  } else {
-    console.log(`Termék #${updated.id} frissítve.`)
-    if (body.priceGross !== undefined) console.log(`  Eladási ár:   ${fmtFt(updated.priceGross)}`)
-    if (body.marketMinGross !== undefined) console.log(`  Piaci min:    ${updated.marketMinGross !== null ? fmtFt(updated.marketMinGross) : '–'}`)
-    if (body.marketShop !== undefined) console.log(`  Piaci forrás: ${updated.marketShop ?? '–'}`)
-  }
+export async function cmdUpdate(_client: HasznoClient, _id: number, _opts: UpdateOpts): Promise<void> {
+  console.error(NOT_AVAILABLE_MSG)
+  process.exitCode = 1
 }
 
 export interface ListingOpts {
@@ -208,28 +185,9 @@ export interface ListingOpts {
   confirm?: () => Promise<boolean>
 }
 
-export async function cmdListing(client: HasznoClient, id: number, opts: ListingOpts): Promise<void> {
-  if (!opts.on && !opts.off) {
-    console.error('Add meg: --on (listáz) vagy --off (levesz a listáról)')
-    process.exitCode = 2
-    return
-  }
-
-  const listed = Boolean(opts.on)
-  const action = listed ? 'listára tegyem' : 'levegyem a listáról'
-
-  if (!opts.yes) {
-    const confirmFn = opts.confirm ?? (() => askConfirm(`Termék #${id}: ${action}?`))
-    const ok = await confirmFn()
-    if (!ok) { console.log('Megszakítva.'); return }
-  }
-
-  const updated = await client.products.setListing(id, { listed })
-  if (opts.json) {
-    console.log(JSON.stringify(updated, null, 2))
-  } else {
-    console.log(`Termék #${updated.id}: ${updated.listed ? 'listán van ✓' : 'nincs listán ✗'}.`)
-  }
+export async function cmdListing(_client: HasznoClient, _id: number, _opts: ListingOpts): Promise<void> {
+  console.error(NOT_AVAILABLE_MSG)
+  process.exitCode = 1
 }
 
 export interface ApplyPricesOpts {
@@ -241,24 +199,9 @@ export interface ApplyPricesOpts {
   confirm?: () => Promise<boolean>
 }
 
-export async function cmdApplyPrices(client: HasznoClient, opts: ApplyPricesOpts): Promise<void> {
-  const ids = opts.ids
-    ? opts.ids.split(',').map(x => Number(x.trim())).filter(n => Number.isFinite(n) && n > 0)
-    : undefined
-  const scope = ids ? `${ids.length} db kiválasztott termék` : 'összes termék'
-
-  if (!opts.yes) {
-    const confirmFn = opts.confirm ?? (() => askConfirm(`Alkalmazza az ajánlott árakat (${scope})?`))
-    const ok = await confirmFn()
-    if (!ok) { console.log('Megszakítva.'); return }
-  }
-
-  const result = await client.products.applyPrices(ids ? { ids } : undefined)
-  if (opts.json) {
-    console.log(JSON.stringify(result, null, 2))
-  } else {
-    console.log(`Kész: ${result.changed}/${result.total} termék ára frissítve.`)
-  }
+export async function cmdApplyPrices(_client: HasznoClient, _opts: ApplyPricesOpts): Promise<void> {
+  console.error(NOT_AVAILABLE_MSG)
+  process.exitCode = 1
 }
 
 export interface DescribeOpts {
@@ -268,36 +211,18 @@ export interface DescribeOpts {
   confirm?: () => Promise<boolean>
 }
 
-export async function cmdDescribe(client: HasznoClient, id: number, opts: DescribeOpts): Promise<void> {
-  if (!opts.yes) {
-    const confirmFn = opts.confirm ?? (() => askConfirm(`AI termékleírás generálása (termék #${id})?`))
-    const ok = await confirmFn()
-    if (!ok) { console.log('Megszakítva.'); return }
-  }
-
-  const result = await client.products.generateAiDescription(id)
-  if (opts.json) {
-    console.log(JSON.stringify(result, null, 2))
-  } else {
-    console.log(result.text)
-  }
+export async function cmdDescribe(_client: HasznoClient, _id: number, _opts: DescribeOpts): Promise<void> {
+  console.error(NOT_AVAILABLE_MSG)
+  process.exitCode = 1
 }
 
 export interface StatsOpts {
   json?: boolean
 }
 
-export async function cmdStats(client: HasznoClient, opts: StatsOpts): Promise<void> {
-  const stats = await client.stats.get()
-  if (opts.json) {
-    console.log(JSON.stringify(stats, null, 2))
-    return
-  }
-  console.log('Termékek összesen:   ' + stats.products)
-  console.log('Veszteséges:         ' + stats.losing)
-  console.log('Piac felett árazott: ' + stats.overMarket)
-  console.log('Javításra szorul:    ' + stats.toFix)
-  console.log('Rendelések:          ' + stats.orders)
+export async function cmdStats(_client: HasznoClient, _opts: StatsOpts): Promise<void> {
+  console.error(NOT_AVAILABLE_MSG)
+  process.exitCode = 1
 }
 
 export interface ImpactOpts {
@@ -306,22 +231,9 @@ export interface ImpactOpts {
   json?: boolean
 }
 
-export async function cmdImpact(client: HasznoClient, opts: ImpactOpts): Promise<void> {
-  const days = opts.days !== undefined ? Number(opts.days) : undefined
-  const impact = await client.stats.getImpact(days !== undefined ? { days } : undefined)
-
-  if (opts.json) {
-    console.log(JSON.stringify(impact, null, 2))
-    return
-  }
-
-  console.log(`Haszon-mérő (${impact.days} nap)`)
-  console.log('─'.repeat(40))
-  console.log(`Alap profit:          ${fmtFt(impact.baseline)}`)
-  console.log(`Extra profit:         ${fmtFt(impact.extraProfit)}`)
-  console.log(`Profit növekedés:     +${fmtPct(impact.pctGain)}`)
-  console.log(`Rendelések:           ${impact.orders}`)
-  console.log(`Auto-továbbított:     ${impact.autoForwardedOrders}`)
+export async function cmdImpact(_client: HasznoClient, _opts: ImpactOpts): Promise<void> {
+  console.error(NOT_AVAILABLE_MSG)
+  process.exitCode = 1
 }
 
 // ── Commander registration ────────────────────────────────────────────────────
@@ -343,12 +255,10 @@ export function registerProductsCommands(program: Command, client: HasznoClient)
   // ── list ──────────────────────────────────────────────────────────────────
   products
     .command('list')
-    .description('Termékek listája marginnal és árállapottal')
-    .option('--all', 'Minden termék, ne csak a listázottak')
+    .description('Termékek listája marginnal és árállapottal (agent endpoint, bolt token)')
     .option('--losing', 'Csak veszteséges termékek (marzs < 0)')
-    .option('--over-market', 'Csak a piaci minimum fölé árázott termékek')
     .option('--cats <nevek>', 'Szűrés beszállítónévre — vesszővel elválasztott részsztringek, pl. "auto,kert"')
-    .action(async (opts: { all?: boolean; losing?: boolean; overMarket?: boolean; cats?: string }) => {
+    .action(async (opts: { losing?: boolean; cats?: string }) => {
       const root = program.opts<{ json?: boolean }>()
       await cmdList(client, { ...opts, json: root.json }).catch(handleError)
     })

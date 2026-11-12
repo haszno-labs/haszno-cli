@@ -1,12 +1,17 @@
 /**
- * CLI commands — orders.
+ * CLI commands — orders (via agent endpoint).
  *
  * Domain: orders
  * Subcommands:
- *   haszno orders list [--status <s>]   list last 50 orders (optionally filtered by status)
- *   haszno orders show <id>             show one order with items and event log
- *   haszno orders ship <id>             mark an order as shipped (write, requires --yes)
- *   haszno orders demo                  create a demo order (demo mode only, requires --yes)
+ *   haszno orders list [--status <s>]   list last 20 orders via agent endpoint (read-only)
+ *   haszno orders show <id>             show one order with items via agent endpoint (read-only)
+ *   haszno orders ship <id>             NOT AVAILABLE with shop token
+ *   haszno orders demo                  NOT AVAILABLE with shop token
+ *
+ * Uses GET /api/agent/orders (AgentOrder[]).
+ * Fields available: id, externalId, customerName, status, totalGross, createdAt,
+ *   items: [{orderId, qty, priceGross, name, sku}]
+ * Fields NOT available via shop token: address, supplierOrderId, trackingNumber, event log.
  *
  * Exit codes:
  *   0  success
@@ -14,7 +19,11 @@
  *   2  usage error (missing required argument, bad flag value, …)
  */
 import { Command } from 'commander'
-import type { HasznoClient, Order } from '../client/index.js'
+import type { HasznoClient, AgentOrder } from '../client/index.js'
+
+const NOT_AVAILABLE_MSG =
+  'Nem elérhető bolt API-kulccsal. Ez a művelet session tokent (webes bejelentkezést) igényel.\n' +
+  'Használd a Haszno webes felületet a végrehajtáshoz.'
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -30,25 +39,25 @@ function isJsonMode(cmd: Command): boolean {
 }
 
 function fmt(n: number): string {
-  return `${(n / 100).toFixed(0)} Ft`
+  return `${n.toLocaleString('hu-HU')} Ft`
 }
 
-function statusEmoji(status: Order['status']): string {
+function statusEmoji(status: AgentOrder['status']): string {
   switch (status) {
     case 'received':
-      return '📥'
+      return '[uj]'
     case 'forwarded':
-      return '📤'
+      return '[kuldve]'
     case 'shipped':
-      return '🚚'
+      return '[szallitva]'
     case 'error':
-      return '❌'
+      return '[hiba]'
     default:
       return '?'
   }
 }
 
-function printOrdersTable(orders: Order[]): void {
+function printOrdersTable(orders: AgentOrder[]): void {
   if (orders.length === 0) {
     console.log('Nincs megjeleníthető rendelés.')
     return
@@ -71,29 +80,19 @@ function printOrdersTable(orders: Order[]): void {
   for (const row of rows) console.log(fmtRow(row))
 }
 
-function printOrderDetail(o: Order): void {
+function printOrderDetail(o: AgentOrder): void {
   console.log(`\nRendelés #${o.id}`)
   console.log(`  Külső ID:      ${o.externalId}`)
   console.log(`  Vevő:          ${o.customerName}`)
-  console.log(`  Cím:           ${o.address}`)
   console.log(`  Állapot:       ${statusEmoji(o.status)} ${o.status}`)
-  if (o.supplierOrderId) console.log(`  Szállítói ID:  ${o.supplierOrderId}`)
-  if (o.trackingNumber) console.log(`  Tracking:      ${o.trackingNumber}`)
   console.log(`  Összeg:        ${fmt(o.totalGross)}`)
   console.log(`  Létrehozva:    ${new Date(o.createdAt).toLocaleString('hu-HU', { timeZone: 'Europe/Budapest' })}`)
+  // Note: address, supplierOrderId, trackingNumber, event log not available via shop token
 
   if (o.items.length > 0) {
     console.log('\n  Tételek:')
     for (const item of o.items) {
       console.log(`    - ${item.name} (SKU: ${item.sku})  ${item.qty} db  × ${fmt(item.priceGross)}`)
-    }
-  }
-
-  if (o.events.length > 0) {
-    console.log('\n  Eseménynapló:')
-    for (const ev of o.events) {
-      const ts = new Date(ev.at).toLocaleString('hu-HU', { timeZone: 'Europe/Budapest' })
-      console.log(`    [${ts}] ${ev.text}`)
     }
   }
   console.log()
@@ -115,7 +114,7 @@ async function interactiveConfirm(question: string): Promise<boolean> {
 
 // ---- registration -----------------------------------------------------------
 
-type ValidStatus = Order['status']
+type ValidStatus = AgentOrder['status']
 const VALID_STATUSES: ValidStatus[] = ['received', 'forwarded', 'shipped', 'error']
 
 export function registerOrdersCommands(program: Command, client: HasznoClient): void {
@@ -126,7 +125,7 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
   // ── orders list ────────────────────────────────────────────────────────────
   orders
     .command('list')
-    .description('Az utolsó 50 rendelés listázása')
+    .description('Az utolsó 20 rendelés listázása (agent endpoint, bolt token)')
     .option(
       '--status <állapot>',
       `Szűrés állapotra (${VALID_STATUSES.join(', ')})`,
@@ -136,9 +135,9 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
         console.error(`Hiba: érvénytelen állapot "${opts.status}". Lehetséges értékek: ${VALID_STATUSES.join(', ')}`)
         process.exit(2)
       }
-      let list: Order[]
+      let list: AgentOrder[]
       try {
-        list = await client.orders.list()
+        list = await client.agent.orders()
       } catch (err) {
         console.error('API hiba:', err instanceof Error ? err.message : String(err))
         process.exit(1)
@@ -156,23 +155,23 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
   // ── orders show ────────────────────────────────────────────────────────────
   orders
     .command('show <id>')
-    .description('Egy rendelés részletes adatai tételekkel és eseménynaplóval')
+    .description('Egy rendelés tételei (agent endpoint, bolt token; cím/tracking nem elérhető)')
     .action(async (idStr: string, _opts: unknown, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id) || id <= 0) {
         console.error('Hiba: az <id> egész szám kell legyen.')
         process.exit(2)
       }
-      let list: Order[]
+      let list: AgentOrder[]
       try {
-        list = await client.orders.list()
+        list = await client.agent.orders()
       } catch (err) {
         console.error('API hiba:', err instanceof Error ? err.message : String(err))
         process.exit(1)
       }
       const order = list.find((o) => o.id === id)
       if (!order) {
-        console.error(`Hiba: a #${id} rendelés nem található.`)
+        console.error(`Hiba: a #${id} rendelés nem található az utolsó 20 között.`)
         process.exit(1)
       }
       if (isJsonMode(cmd)) {
@@ -185,59 +184,20 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
   // ── orders ship ────────────────────────────────────────────────────────────
   orders
     .command('ship <id>')
-    .description('Rendelés megjelölése szállítottként (írás — szükséges: --yes)')
+    .description('Rendelés megjelölése szállítottként — NEM ELÉRHETŐ bolt API-kulccsal')
     .option('--yes', 'Megerősítés kihagyása')
-    .action(async (idStr: string, opts: { yes?: boolean }, cmd: Command) => {
-      const id = parseInt(idStr, 10)
-      if (isNaN(id) || id <= 0) {
-        console.error('Hiba: az <id> egész szám kell legyen.')
-        process.exit(2)
-      }
-      if (!opts.yes) {
-        const ok = await interactiveConfirm(`Biztosan szállítottként jelöled a #${id} rendelést?`)
-        if (!ok) {
-          console.log('Megszakítva.')
-          process.exit(0)
-        }
-      }
-      let updated: Order
-      try {
-        updated = await client.orders.ship(id)
-      } catch (err) {
-        console.error('API hiba:', err instanceof Error ? err.message : String(err))
-        process.exit(1)
-      }
-      if (isJsonMode(cmd)) {
-        process.stdout.write(JSON.stringify(updated, null, 2) + '\n')
-      } else {
-        console.log(`✓ #${id} rendelés állapota: ${updated.status}`)
-      }
+    .action(async (_idStr: string) => {
+      console.error(NOT_AVAILABLE_MSG)
+      process.exit(1)
     })
 
   // ── orders demo ────────────────────────────────────────────────────────────
   orders
     .command('demo')
-    .description('Demo rendelés létrehozása (csak demo módban — szükséges: --yes)')
+    .description('Demo rendelés létrehozása — NEM ELÉRHETŐ bolt API-kulccsal')
     .option('--yes', 'Megerősítés kihagyása')
-    .action(async (opts: { yes?: boolean }, cmd: Command) => {
-      if (!opts.yes) {
-        const ok = await interactiveConfirm('Demo rendelést hozol létre. Folytatod?')
-        if (!ok) {
-          console.log('Megszakítva.')
-          process.exit(0)
-        }
-      }
-      let result: { id: number }
-      try {
-        result = await client.orders.createDemo()
-      } catch (err) {
-        console.error('API hiba:', err instanceof Error ? err.message : String(err))
-        process.exit(1)
-      }
-      if (isJsonMode(cmd)) {
-        process.stdout.write(JSON.stringify(result, null, 2) + '\n')
-      } else {
-        console.log(`✓ Demo rendelés létrehozva: #${result.id}`)
-      }
+    .action(async () => {
+      console.error(NOT_AVAILABLE_MSG)
+      process.exit(1)
     })
 }

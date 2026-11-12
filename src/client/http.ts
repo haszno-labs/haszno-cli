@@ -1,7 +1,8 @@
 /**
  * Low-level fetch wrapper — the ONLY place HTTP calls happen in the client.
- * - Auth from env: HASZNO_API_KEY → x-api-key header (falls back to ARFUTAR_API_KEY).
- * - Also accepts HASZNO_BASIC / ARFUTAR_BASIC for HTTP Basic auth.
+ * - Auth from env: HASZNO_API_TOKEN → Authorization: Bearer (canonical for shop API tokens)
+ *   HASZNO_API_KEY → Authorization: Bearer (silent migration alias)
+ *   HASZNO_BASIC  → Authorization: Basic  (HTTP Basic, for session-based endpoints)
  * - Never logs or exposes credentials.
  * - Retries 5xx and 429 with exponential back-off (max 3 attempts).
  */
@@ -21,21 +22,22 @@ export interface HttpOptions {
   timeoutMs?: number
 }
 
-/** CLI version for User-Agent */
-const CLI_VERSION = '0.1.0'
-
 function buildAuthHeader(opts: HttpOptions): Record<string, string> {
-  // Never print credentials
-  const key =
+  // Shop API token: HASZNO_API_TOKEN (canonical) or HASZNO_API_KEY (migration alias).
+  // Both are sent as Authorization: Bearer <token>.
+  // Never print credentials.
+  const bearerToken =
     opts.apiKey ??
-    process.env['HASZNO_API_KEY'] ??
-    process.env['ARFUTAR_API_KEY'] // silent fallback
-  if (key) return { 'x-api-key': key }
+    process.env['HASZNO_API_TOKEN'] ??
+    process.env['HASZNO_API_KEY'] ?? // silent migration alias
+    process.env['ARFUTAR_API_KEY'] // legacy alias
+  if (bearerToken) return { Authorization: `Bearer ${bearerToken}` }
 
+  // HTTP Basic is kept as an escape hatch for session-based endpoints.
   const basic =
     opts.basicAuth ??
     process.env['HASZNO_BASIC'] ??
-    process.env['ARFUTAR_BASIC'] // silent fallback
+    process.env['ARFUTAR_BASIC'] // legacy alias
   if (basic) {
     const encoded = Buffer.from(basic).toString('base64')
     return { Authorization: `Basic ${encoded}` }
@@ -56,7 +58,7 @@ export async function request<T>(
   const baseUrl = (
     opts.baseUrl ??
     process.env['HASZNO_API_URL'] ??
-    process.env['ARFUTAR_API_URL'] ?? // silent fallback
+    process.env['ARFUTAR_API_URL'] ??
     'https://haszno.com'
   ).replace(/\/$/, '')
   const url = `${baseUrl}${path}`
@@ -69,7 +71,7 @@ export async function request<T>(
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    'User-Agent': `haszno-cli/${CLI_VERSION}`,
+    'User-Agent': 'haszno-cli/0.1.0',
     ...buildAuthHeader(opts),
   }
 

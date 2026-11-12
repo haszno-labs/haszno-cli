@@ -74,25 +74,30 @@ haszno products list --json | jq '.[] | .name'
 |---|---|
 | `--json` | Machine-readable JSON output |
 | `--api-url <url>` | Override API URL (env: `HASZNO_API_URL`) |
-| `--api-key <key>` | Override API key (env: `HASZNO_API_KEY`) |
+| `--api-key <token>` | Override Bearer token (env: `HASZNO_API_TOKEN`) |
 
 ### Commands overview
 
-| Command | Description |
-|---|---|
-| `haszno login` | Authenticate and save config |
-| `haszno account ping` | Check API connection |
-| `haszno account stats` | Dashboard summary |
-| `haszno account impact` | Profit impact meter |
-| `haszno products list` | List products |
-| `haszno products apply-prices --yes` | Apply recommended prices |
-| `haszno proposals list` | List pricing proposals |
-| `haszno proposals approve --yes` | Approve all pending proposals |
-| `haszno rules list` | List automation rules |
-| `haszno rules run <id> --yes` | Run a rule manually |
-| `haszno feeds import-supplier ...` | Import supplier feed |
-| `haszno ideas list` | AI product ideas |
-| `haszno orders list` | List orders |
+| Command | Description | Shop token |
+|---|---|---|
+| `haszno products list` | List products with margin | ✅ |
+| `haszno products show <id>` | Product detail | ✅ |
+| `haszno products apply-prices --yes` | Apply recommended prices | ❌ session only |
+| `haszno proposals list` | List **pending** proposals | ✅ |
+| `haszno proposals create --product-id N --price N --reason "..." --yes` | Create a pending proposal | ✅ |
+| `haszno proposals approve --yes` | Approve proposals | ❌ session only |
+| `haszno proposals reject --ids N --yes` | Reject proposals | ❌ session only |
+| `haszno proposals rollback --batch B --yes` | Roll back a batch | ❌ session only |
+| `haszno orders list` | Last 20 orders | ✅ |
+| `haszno orders show <id>` | Order with line items | ✅ |
+| `haszno orders ship <id> --yes` | Mark as shipped | ❌ session only |
+| `haszno rules list` | List automation rules | ✅ |
+| `haszno rules run <id> --yes` | Run a rule manually | ❌ session only |
+| `haszno feeds import-supplier ...` | Import supplier feed | ❌ session only |
+| `haszno ideas list` | AI product ideas | ✅ |
+
+> **Shop token** = works with a per-shop Bearer token from Haszno → Integráció → API-kulcsok.
+> Session-only operations require logging in via the web and using `HASZNO_BASIC` (HTTP Basic).
 
 ---
 
@@ -100,11 +105,24 @@ haszno products list --json | jq '.[] | .name'
 
 ### Priority order (highest to lowest)
 
-1. `--api-url` / `--api-key` command-line flags
-2. `HASZNO_API_URL` / `HASZNO_API_KEY` environment variables
-3. `~/.config/haszno/config.json` (written by `haszno login`)
-4. `ARFUTAR_API_URL` / `ARFUTAR_API_KEY` (backward-compatible fallback)
-5. `~/.config/arfutar/config.json` (backward-compatible fallback)
+1. `--api-key <token>` command-line flag → sent as `Authorization: Bearer <token>`
+2. `HASZNO_API_TOKEN` environment variable — per-shop Bearer token (**canonical**; create at Haszno → Integráció → API-kulcsok)
+3. `HASZNO_API_KEY` — legacy alias for `HASZNO_API_TOKEN` (silent migration; treated identically)
+4. `HASZNO_BASIC` — HTTP Basic auth (session-based endpoints only)
+5. `~/.config/haszno/config.json` (written by `haszno login`)
+6. `ARFUTAR_API_KEY` / `ARFUTAR_API_URL` (backward-compatible fallback)
+7. `~/.config/arfutar/config.json` (backward-compatible fallback)
+
+### Creating a shop token
+
+1. Log in to [haszno.com](https://haszno.com) → **Integráció → API-kulcsok**
+2. Click **Új API-kulcs**, give it a name, select the **agent** scope
+3. Copy the `haszno_…` token — shown only once
+4. `export HASZNO_API_TOKEN=haszno_…`
+
+> **Approval is human-only by design.** Shop tokens can read products/orders/proposals
+> and create pending proposals. Approve / reject / rollback require a session token
+> and are only available through the Haszno web dashboard.
 
 ### Config file format
 
