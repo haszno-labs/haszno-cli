@@ -3956,7 +3956,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
           process.exit(2);
           return;
         }
-        const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+        const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/-/g, "_"));
         rows = lines.slice(1).map((line) => {
           const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
           const obj = {};

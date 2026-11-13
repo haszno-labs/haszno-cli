@@ -1310,7 +1310,7 @@ export function registerShopCommands(
             process.exit(2)
             return
           }
-          const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''))
+          const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase().replace(/-/g, '_'))
           rows = lines.slice(1).map((line) => {
             // Simple CSV parsing (no quoted fields with commas)
             const values = line.split(',').map((v) => v.trim().replace(/^"|"$/g, ''))
