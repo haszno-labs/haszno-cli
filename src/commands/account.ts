@@ -232,9 +232,24 @@ export function registerAccountCommands(
   // ── logout (top-level) ────────────────────────────────────────────────────
   program
     .command('logout')
-    .description('API-token törlése a konfigurációs fájlból')
+    .description('API-token visszavonása és törlése a konfigurációs fájlból')
     .action(async (_opts: Record<string, unknown>, _cmd: Command) => {
       const existing: Record<string, unknown> = { ...readConfigObject(configPath) }
+      const apiKey = existing['apiKey'] as string | undefined
+
+      // Best-effort server-side revocation (Bearer token only; silently skip if no token or if call fails)
+      if (apiKey && apiKey.startsWith('haszno_')) {
+        const apiUrl = (existing['apiUrl'] as string | undefined) ?? 'https://haszno.com'
+        try {
+          const revokeOpts = { ...httpOpts, baseUrl: apiUrl, apiKey }
+          const { post: httpPost } = await import('../client/http.js')
+          await httpPost('/api/v1/auth/tokens/revoke-current', {}, revokeOpts)
+          process.stdout.write('Token visszavonva a szerveren.\n')
+        } catch {
+          process.stderr.write('Figyelmeztetés: a szerver oldali token visszavonás nem sikerült (hálózati hiba vagy token már érvénytelen). A helyi token törlése folytatódik.\n')
+        }
+      }
+
       delete existing['apiKey']
       delete existing['userEmail']
       delete existing['userName']
@@ -569,6 +584,60 @@ export function registerAccountCommands(
       } else {
         process.stdout.write(`haszno ${cliVersion}\n`)
         process.stdout.write(`API: ${apiStatus === 'ok' ? 'OK elérhető' : 'nem elérhető'}\n`)
+      }
+    })
+
+  // ── tokens (top-level) ────────────────────────────────────────────────────
+  // Note: GET /api/auth/tokens and DELETE /api/auth/tokens/:id require session
+  // authentication (not Bearer token). These commands work only when called with
+  // session credentials. POST /api/auth/tokens/revoke-current requires Bearer.
+  const tokens = program
+    .command('tokens')
+    .description('API tokenek kezelése')
+
+  tokens
+    .command('list')
+    .description('Aktív API tokenek listája (session-alapú hitelesítés szükséges)')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const { get: httpGet } = await import('../client/http.js')
+        const items = await httpGet<Array<{ id: number; name: string; scope: string; createdAt: string; lastUsedAt: string | null; expiresAt: string | null }>>('/api/v1/auth/tokens', httpOpts)
+        if (getJsonFlag(cmd)) {
+          printJson(items)
+        } else {
+          if (!Array.isArray(items) || items.length === 0) {
+            process.stdout.write('Nincs aktív token.\n')
+            return
+          }
+          process.stdout.write('Aktív tokenek:\n')
+          for (const t of items) {
+            const expires = t.expiresAt ? t.expiresAt.slice(0, 10) : 'nem jár le'
+            const lastUsed = t.lastUsedAt ? t.lastUsedAt.slice(0, 10) : 'soha'
+            process.stdout.write(`  #${t.id}  ${t.name.padEnd(20)}  ${t.scope.padEnd(12)}  lejár: ${expires}  utoljára: ${lastUsed}\n`)
+          }
+        }
+      } catch (err) {
+        handleError(err)
+      }
+    })
+
+  tokens
+    .command('revoke <id>')
+    .description('API token visszavonása azonosító alapján (session-alapú hitelesítés szükséges)')
+    .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id) || id <= 0) {
+        process.stderr.write('Érvénytelen token azonosító.\n')
+        process.exit(2)
+        return
+      }
+      try {
+        const { del: httpDel } = await import('../client/http.js')
+        const result = await httpDel<{ ok: boolean }>(`/api/v1/auth/tokens/${id}`, httpOpts)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Token #${id} visszavonva.\n`)
+      } catch (err) {
+        handleError(err)
       }
     })
 }

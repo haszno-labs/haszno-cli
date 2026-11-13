@@ -127,6 +127,26 @@ haszno shop reservations
 | `haszno shop reservation decline <id>` | Decline a reservation (as seller) |
 | `haszno shop reservation cancel <id>` | Cancel a reservation (as buyer) |
 | `haszno shop reservation complete <id>` | Mark a reservation as complete (as seller) |
+| `haszno shop reservation counter <id> --price <Ft>` | Send a counter-offer (as seller) |
+| `haszno shop reservation accept-counter <id>` | Accept seller's counter-offer (as buyer) |
+| `haszno shop reservation messages <id>` | List messages on a reservation |
+| `haszno shop reservation message <id> --text <text>` | Send a message on a reservation |
+| `haszno shop reservation review <id> --rating <1-5>` | Leave a review for a completed reservation |
+| `haszno shop inquiry reply <id> --message <text>` | Reply to an inquiry (as seller) |
+| `haszno shop saved-search list` | List saved searches |
+| `haszno shop saved-search add --name <name>` | Save a search (--query, --category, …) |
+| `haszno shop saved-search remove <id>` | Delete a saved search |
+| `haszno shop watch <adId>` | Subscribe to price-drop alerts for an ad |
+| `haszno shop unwatch <adId>` | Unsubscribe from price-drop alerts |
+| `haszno shop import-url <url>` | Import ad data from a URL (AI-assisted) |
+| `haszno shop draft show` | Show server-side ad draft |
+| `haszno shop draft save` | Save draft (JSON from stdin) |
+| `haszno shop draft clear` | Delete draft |
+| `haszno shop post --remove-bg` | Post ad with AI background removal on images |
+| `haszno shop post-bulk <source>` | Bulk post from CSV or photo directory (--dry-run, --yes) |
+| `haszno tokens list` | List active API tokens (session auth required) |
+| `haszno tokens revoke <id>` | Revoke an API token (session auth required) |
+| `haszno logout` | Revoke token server-side and remove from local config |
 
 ---
 

@@ -12,7 +12,7 @@ import { resolveConnection } from './config.js'
 import { HasznoApiError } from './error.js'
 
 /** CLI version for User-Agent */
-const CLI_VERSION = '0.1.0'
+const CLI_VERSION = '0.3.0'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -103,6 +103,8 @@ export interface ShopReservation {
   status: 'fuggoben' | 'elfogadva' | 'elutasitva' | 'visszavonva' | 'teljesitve' | 'lejart' | string
   message: string | null
   offerPriceGross: number | null
+  counterPriceGross?: number | null
+  agreedPriceGross?: number | null
   buyerName: string
   buyerPhone: string | null
   buyerEmail: string | null
@@ -120,12 +122,95 @@ export interface ShopReservationSimple {
   id: number
   adId: number
   status: string
+  offerPriceGross?: number | null
+  counterPriceGross?: number | null
+  agreedPriceGross?: number | null
   heldUntil: string | null
   createdAt: string
   updatedAt: string
   decidedAt: string | null
   soldPriceGross?: number | null
 }
+
+export interface ShopReservationMessage {
+  id: number
+  author: 'buyer' | 'seller' | string
+  body: string
+  createdAt: string
+}
+
+export interface ShopReservationReview {
+  id: number
+  author: 'buyer' | 'seller' | string
+  rating: number
+  comment: string | null
+  createdAt: string
+}
+
+export interface ShopInquiryReply {
+  id: number
+  inquiryId: number
+  message: string
+  createdAt: string
+}
+
+export interface ShopSavedSearchFilters {
+  q?: string
+  cat?: string
+  sub?: string
+  min?: number
+  max?: number
+  county?: string
+  cond?: string
+  attrs?: Record<string, unknown>
+}
+
+export interface ShopSavedSearch {
+  id: number
+  name: string
+  filters: ShopSavedSearchFilters
+  alertEnabled: boolean
+  lastAlertSentAt: string | null
+  createdAt: string
+}
+
+export interface ShopDraft {
+  payload: Record<string, unknown>
+  updatedAt: string
+}
+
+export interface ShopUrlImportResult {
+  title?: string
+  description?: string
+  price?: number | null
+  images: string[]
+  parsed: Record<string, unknown>
+}
+
+export interface ShopWatchResult {
+  watched: boolean
+}
+
+export interface ShopApiToken {
+  id: number
+  name: string
+  scope: string
+  createdAt: string
+  lastUsedAt: string | null
+  expiresAt: string | null
+}
+
+export interface ShopSellerProfile {
+  sellerType: 'maganszemely' | 'kereskedo' | null
+  companyName: string | null
+  companyAddress: string | null
+  companyRegNumber: string | null
+  declaredAt: string | null
+}
+
+export type ShopSellerProfileInput =
+  | { sellerType: 'maganszemely' }
+  | { sellerType: 'kereskedo'; companyName: string; companyAddress: string; companyRegNumber?: string | null }
 
 export interface ShopInquiry {
   id: number
@@ -178,6 +263,8 @@ export interface ShopAdPostBody {
   priceGross: number | null
   negotiable: boolean
   condition: 'uj' | 'ujszeru' | 'hasznalt' | 'serult'
+  /** Required (min 10 chars) when condition is 'hasznalt' or 'serult'. */
+  defects?: string | null
   county: string
   city: string
   images: string[]
@@ -328,6 +415,7 @@ export interface ShopHasznoClient {
   inquiries: {
     listReceived(): Promise<ShopInquiry[]>
     send(adId: number, body: { name: string; email: string; phone?: string; message: string }): Promise<{ ok: boolean }>
+    reply(id: number, message: string): Promise<{ reply: ShopInquiryReply }>
   }
   favorites: {
     list(): Promise<ShopAd[]>
@@ -348,6 +436,40 @@ export interface ShopHasznoClient {
     decline(id: number): Promise<{ reservation: ShopReservationSimple }>
     cancel(id: number): Promise<{ reservation: ShopReservationSimple }>
     complete(id: number, body?: { soldPriceGross?: number | null }): Promise<{ reservation: ShopReservationSimple }>
+    counter(id: number, priceGross: number): Promise<{ reservation: ShopReservationSimple }>
+    acceptCounter(id: number): Promise<{ reservation: ShopReservationSimple }>
+    messages(id: number): Promise<{ items: ShopReservationMessage[] }>
+    message(id: number, body: string): Promise<{ message: ShopReservationMessage }>
+    review(id: number, rating: number, comment?: string): Promise<{ review: ShopReservationReview }>
+  }
+  savedSearches: {
+    list(): Promise<ShopSavedSearch[]>
+    add(params: { name: string; filters: ShopSavedSearchFilters; alertEnabled?: boolean }): Promise<ShopSavedSearch>
+    remove(id: number): Promise<{ ok: boolean }>
+  }
+  watch: {
+    watch(adId: number): Promise<ShopWatchResult>
+    unwatch(adId: number): Promise<ShopWatchResult>
+  }
+  urlImport: {
+    importUrl(url: string): Promise<ShopUrlImportResult>
+  }
+  draft: {
+    show(): Promise<ShopDraft | null>
+    save(payload: Record<string, unknown>): Promise<ShopDraft>
+    clear(): Promise<{ ok: boolean }>
+  }
+  images: {
+    removeBg(id: number): Promise<ShopImageUploadResult>
+  }
+  tokens: {
+    list(): Promise<ShopApiToken[]>
+    revoke(id: number): Promise<{ ok: boolean }>
+    revokeCurrent(): Promise<{ ok: boolean }>
+  }
+  sellerProfile: {
+    get(): Promise<ShopSellerProfile>
+    set(body: ShopSellerProfileInput): Promise<ShopSellerProfile>
   }
 }
 
@@ -437,6 +559,7 @@ export function createShopClient(opts: HttpOptions): ShopHasznoClient {
         return result.items
       },
       send: (adId, body) => post(`/api/v1/shop/ads/${adId}/inquiries`, body, o),
+      reply: (id, message) => post(`/api/v1/shop/my/inquiries/${id}/reply`, { message }, o),
     },
 
     favorites: {
@@ -458,6 +581,47 @@ export function createShopClient(opts: HttpOptions): ShopHasznoClient {
       decline: (id) => post(`/api/v1/shop/my/reservations/${id}/decline`, null, o),
       cancel: (id) => post(`/api/v1/shop/my/reservations/${id}/cancel`, null, o),
       complete: (id, body = {}) => post(`/api/v1/shop/my/reservations/${id}/complete`, body, o),
+      counter: (id, priceGross) => post(`/api/v1/shop/my/reservations/${id}/counter`, { priceGross }, o),
+      acceptCounter: (id) => post(`/api/v1/shop/my/reservations/${id}/accept-counter`, {}, o),
+      messages: (id) => get(`/api/v1/shop/my/reservations/${id}/messages`, o),
+      message: (id, body) => post(`/api/v1/shop/my/reservations/${id}/messages`, { body }, o),
+      review: (id, rating, comment) => post(`/api/v1/shop/my/reservations/${id}/review`, { rating, ...(comment !== undefined ? { comment } : {}) }, o),
+    },
+
+    savedSearches: {
+      list: () => get('/api/v1/shop/my/saved-searches', o),
+      add: (params) => post('/api/v1/shop/my/saved-searches', params, o),
+      remove: (id) => del(`/api/v1/shop/my/saved-searches/${id}`, o),
+    },
+
+    watch: {
+      watch: (adId) => put(`/api/v1/shop/ads/${adId}/watch`, null, o),
+      unwatch: (adId) => del(`/api/v1/shop/ads/${adId}/watch`, o),
+    },
+
+    urlImport: {
+      importUrl: (url) => post('/api/v1/shop/assist/url-import', { url }, o),
+    },
+
+    draft: {
+      show: () => get('/api/v1/shop/my/draft', o),
+      save: (payload) => put('/api/v1/shop/my/draft', payload, o),
+      clear: () => del('/api/v1/shop/my/draft', o),
+    },
+
+    images: {
+      removeBg: (id) => post(`/api/v1/shop/images/${id}/remove-bg`, {}, o),
+    },
+
+    tokens: {
+      list: () => get('/api/v1/auth/tokens', o),
+      revoke: (id) => del(`/api/v1/auth/tokens/${id}`, o),
+      revokeCurrent: () => post('/api/v1/auth/tokens/revoke-current', {}, o),
+    },
+
+    sellerProfile: {
+      get: () => get('/api/v1/shop/my/seller-profile', o),
+      set: (body) => put('/api/v1/shop/my/seller-profile', body, o),
     },
   }
 }
