@@ -128,6 +128,26 @@ haszno shop reservations
 | `haszno shop reservation decline <id>` | Foglalás elutasítása (eladóként) |
 | `haszno shop reservation cancel <id>` | Foglalás lemondása (vevőként) |
 | `haszno shop reservation complete <id>` | Foglalás teljesítése (eladóként) |
+| `haszno shop reservation counter <id> --price <Ft>` | Ellenajánlat küldése (eladóként) |
+| `haszno shop reservation accept-counter <id>` | Ellenajánlat elfogadása (vevőként) |
+| `haszno shop reservation messages <id>` | Foglaláshoz tartozó üzenetek listája |
+| `haszno shop reservation message <id> --text <szöveg>` | Üzenet küldése a foglaláshoz |
+| `haszno shop reservation review <id> --rating <1-5>` | Értékelés leadása a foglaláshoz |
+| `haszno shop inquiry reply <id> --message <szöveg>` | Válasz küldése egy érdeklődőnek |
+| `haszno shop saved-search list` | Mentett keresések listázása |
+| `haszno shop saved-search add --name <név>` | Keresési feltétel mentése (--query, --category, …) |
+| `haszno shop saved-search remove <id>` | Mentett keresés törlése |
+| `haszno shop watch <adId>` | Hirdetés figyelése (ár-/státuszváltozás) |
+| `haszno shop unwatch <adId>` | Hirdetés figyelésének leállítása |
+| `haszno shop import-url <url>` | Hirdetés adatainak importálása egy URL-ről (AI-segítség) |
+| `haszno shop draft show` | Szerveren tárolt vázlat megjelenítése |
+| `haszno shop draft save` | Vázlat mentése (JSON stdin-ről) |
+| `haszno shop draft clear` | Vázlat törlése |
+| `haszno shop post --remove-bg` | Hirdetés feladása háttéreltávolítással |
+| `haszno shop post-bulk <forrás>` | Tömeges feladás CSV-ből vagy könyvtárból (--dry-run, --yes) |
+| `haszno tokens list` | Aktív API-tokenek listázása (session-hitelesítés) |
+| `haszno tokens revoke <id>` | API-token visszavonása (session-hitelesítés) |
+| `haszno logout` | Mentett token visszavonása a szerveren és törlése helyben |
 
 ---
 

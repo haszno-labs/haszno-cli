@@ -941,3 +941,342 @@ describe('shop command error mapping', () => {
     }
   })
 })
+
+// ── reservation counter ───────────────────────────────────────────────────────
+
+describe('haszno shop reservation counter', () => {
+  it('calls POST /api/v1/shop/my/reservations/:id/counter with priceGross', async () => {
+    const resv = { id: 1, adId: 2, status: 'fuggoben', offerPriceGross: null, counterPriceGross: 15000, agreedPriceGross: null, heldUntil: null, createdAt: '', updatedAt: '', decidedAt: null }
+    const { fn, calls } = makeFetch(200, { reservation: resv })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'reservation', 'counter', '1', '--price', '15000'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/reservations/1/counter`)
+      expect(calls[0].init.method).toBe('POST')
+      const body = JSON.parse(calls[0].init.body as string)
+      expect(body.priceGross).toBe(15000)
+      expect(cap.text()).toContain('15')
+    } finally { cap.restore() }
+  })
+})
+
+// ── reservation accept-counter ────────────────────────────────────────────────
+
+describe('haszno shop reservation accept-counter', () => {
+  it('calls POST /api/v1/shop/my/reservations/:id/accept-counter', async () => {
+    const resv = { id: 1, adId: 2, status: 'fuggoben', offerPriceGross: 15000, counterPriceGross: null, agreedPriceGross: null, heldUntil: null, createdAt: '', updatedAt: '', decidedAt: null }
+    const { fn, calls } = makeFetch(200, { reservation: resv })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'reservation', 'accept-counter', '1'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/reservations/1/accept-counter`)
+      expect(calls[0].init.method).toBe('POST')
+      expect(cap.text()).toContain('elfogadva')
+    } finally { cap.restore() }
+  })
+})
+
+// ── reservation messages ──────────────────────────────────────────────────────
+
+describe('haszno shop reservation messages', () => {
+  it('calls GET /api/v1/shop/my/reservations/:id/messages', async () => {
+    const msgs = [{ id: 1, author: 'buyer', body: 'Szia!', createdAt: '2026-01-01T10:00:00Z' }]
+    const { fn, calls } = makeFetch(200, { items: msgs })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'reservation', 'messages', '5'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/reservations/5/messages`)
+      expect(calls[0].init.method).toBe('GET')
+      expect(cap.text()).toContain('Szia!')
+    } finally { cap.restore() }
+  })
+})
+
+// ── reservation message ───────────────────────────────────────────────────────
+
+describe('haszno shop reservation message', () => {
+  it('calls POST /api/v1/shop/my/reservations/:id/messages with body', async () => {
+    const msg = { id: 2, author: 'seller', body: 'Igen, rendben!', createdAt: '2026-01-01T11:00:00Z' }
+    const { fn, calls } = makeFetch(201, { message: msg })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'reservation', 'message', '5', '--text', 'Igen, rendben!'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/reservations/5/messages`)
+      expect(calls[0].init.method).toBe('POST')
+      const body = JSON.parse(calls[0].init.body as string)
+      expect(body.body).toBe('Igen, rendben!')
+      expect(cap.text()).toContain('#2')
+    } finally { cap.restore() }
+  })
+})
+
+// ── reservation review ────────────────────────────────────────────────────────
+
+describe('haszno shop reservation review', () => {
+  it('calls POST /api/v1/shop/my/reservations/:id/review with rating and comment', async () => {
+    const review = { id: 1, author: 'buyer', rating: 5, comment: 'Kiváló!', createdAt: '2026-01-01T12:00:00Z' }
+    const { fn, calls } = makeFetch(201, { review })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'reservation', 'review', '5', '--rating', '5', '--comment', 'Kiváló!'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/reservations/5/review`)
+      expect(calls[0].init.method).toBe('POST')
+      const body = JSON.parse(calls[0].init.body as string)
+      expect(body.rating).toBe(5)
+      expect(body.comment).toBe('Kiváló!')
+      expect(cap.text()).toContain('5 csillag')
+    } finally { cap.restore() }
+  })
+
+  it('exits 2 when --rating is out of range', async () => {
+    const { fn } = makeFetch(201, {})
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    const exitSpy = mockExit()
+    try {
+      await expect(
+        buildShopProgram(sc).parseAsync(['shop', 'reservation', 'review', '5', '--rating', '6'], { from: 'user' }),
+      ).rejects.toThrow('process.exit called')
+      expect(exitSpy).toHaveBeenCalledWith(2)
+    } finally { cap.restore(); exitSpy.mockRestore() }
+  })
+})
+
+// ── inquiry reply ─────────────────────────────────────────────────────────────
+
+describe('haszno shop inquiry reply', () => {
+  it('calls POST /api/v1/shop/my/inquiries/:id/reply', async () => {
+    const reply = { id: 1, inquiryId: 42, message: 'Igen, még elérhető!', createdAt: '2026-01-01T12:00:00Z' }
+    const { fn, calls } = makeFetch(201, { reply })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'inquiry', 'reply', '42', '--message', 'Igen, még elérhető!'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/inquiries/42/reply`)
+      expect(calls[0].init.method).toBe('POST')
+      const body = JSON.parse(calls[0].init.body as string)
+      expect(body.message).toBe('Igen, még elérhető!')
+      expect(cap.text()).toContain('#42')
+    } finally { cap.restore() }
+  })
+})
+
+// ── saved-search list ─────────────────────────────────────────────────────────
+
+describe('haszno shop saved-search list', () => {
+  it('calls GET /api/v1/shop/my/saved-searches', async () => {
+    const searches = [{ id: 1, name: 'Biciklik', filters: { q: 'bicikli', cat: 'sport' }, alertEnabled: true, lastAlertSentAt: null, createdAt: '2026-01-01' }]
+    const { fn, calls } = makeFetch(200, searches)
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'saved-search', 'list'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/saved-searches`)
+      expect(calls[0].init.method).toBe('GET')
+      expect(cap.text()).toContain('Biciklik')
+    } finally { cap.restore() }
+  })
+})
+
+// ── saved-search add ──────────────────────────────────────────────────────────
+
+describe('haszno shop saved-search add', () => {
+  it('calls POST /api/v1/shop/my/saved-searches with name and filters', async () => {
+    const saved = { id: 2, name: 'Futópad', filters: { q: 'futópad', cat: 'sport', min: 10000 }, alertEnabled: true, lastAlertSentAt: null, createdAt: '2026-01-02' }
+    const { fn, calls } = makeFetch(201, saved)
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(
+        ['shop', 'saved-search', 'add', '--name', 'Futópad', '--query', 'futópad', '--category', 'sport', '--min-price', '10000'],
+        { from: 'user' },
+      )
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/saved-searches`)
+      expect(calls[0].init.method).toBe('POST')
+      const body = JSON.parse(calls[0].init.body as string)
+      expect(body.name).toBe('Futópad')
+      expect(body.filters.q).toBe('futópad')
+      expect(body.filters.cat).toBe('sport')
+      expect(body.filters.min).toBe(10000)
+      expect(cap.text()).toContain('#2')
+    } finally { cap.restore() }
+  })
+})
+
+// ── saved-search remove ───────────────────────────────────────────────────────
+
+describe('haszno shop saved-search remove', () => {
+  it('calls DELETE /api/v1/shop/my/saved-searches/:id', async () => {
+    const { fn, calls } = makeFetch(200, { ok: true })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'saved-search', 'remove', '1'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/saved-searches/1`)
+      expect(calls[0].init.method).toBe('DELETE')
+      expect(cap.text()).toContain('#1')
+    } finally { cap.restore() }
+  })
+})
+
+// ── watch / unwatch ───────────────────────────────────────────────────────────
+
+describe('haszno shop watch / unwatch', () => {
+  it('watch calls PUT /api/v1/shop/ads/:id/watch', async () => {
+    const { fn, calls } = makeFetch(200, { watched: true })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'watch', '42'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/42/watch`)
+      expect(calls[0].init.method).toBe('PUT')
+      expect(cap.text()).toContain('#42')
+    } finally { cap.restore() }
+  })
+
+  it('unwatch calls DELETE /api/v1/shop/ads/:id/watch', async () => {
+    const { fn, calls } = makeFetch(200, { watched: false })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'unwatch', '42'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/42/watch`)
+      expect(calls[0].init.method).toBe('DELETE')
+      expect(cap.text()).toContain('#42')
+    } finally { cap.restore() }
+  })
+})
+
+// ── import-url ────────────────────────────────────────────────────────────────
+
+describe('haszno shop import-url', () => {
+  it('calls POST /api/v1/shop/assist/url-import and shows result', async () => {
+    const data = { title: 'Bicikli', description: 'Jó állapotban', price: 25000, images: ['http://example.com/img.jpg'], parsed: { brand: 'Trek' } }
+    const { fn, calls } = makeFetch(200, data)
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'import-url', 'https://example.com/ad/1'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/assist/url-import`)
+      expect(calls[0].init.method).toBe('POST')
+      const body = JSON.parse(calls[0].init.body as string)
+      expect(body.url).toBe('https://example.com/ad/1')
+      expect(cap.text()).toContain('Bicikli')
+      expect(cap.text()).toContain('25')
+    } finally { cap.restore() }
+  })
+})
+
+// ── draft commands ────────────────────────────────────────────────────────────
+
+describe('haszno shop draft show', () => {
+  it('calls GET /api/v1/shop/my/draft and shows result', async () => {
+    const d = { payload: { title: 'Kerékpár', priceGross: 50000 }, updatedAt: '2026-01-01T10:00:00Z' }
+    const { fn, calls } = makeFetch(200, d)
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'draft', 'show'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/draft`)
+      expect(calls[0].init.method).toBe('GET')
+      expect(cap.text()).toContain('Kerékpár')
+    } finally { cap.restore() }
+  })
+
+  it('shows "Nincs mentett vázlat." when draft is null', async () => {
+    const { fn } = makeFetch(200, null)
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'draft', 'show'], { from: 'user' })
+      expect(cap.text()).toContain('Nincs mentett vázlat.')
+    } finally { cap.restore() }
+  })
+})
+
+describe('haszno shop draft clear', () => {
+  it('calls DELETE /api/v1/shop/my/draft', async () => {
+    const { fn, calls } = makeFetch(200, { ok: true })
+    const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    const cap = captureOutput()
+    try {
+      await buildShopProgram(sc).parseAsync(['shop', 'draft', 'clear'], { from: 'user' })
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/draft`)
+      expect(calls[0].init.method).toBe('DELETE')
+      expect(cap.text()).toContain('törölve')
+    } finally { cap.restore() }
+  })
+})
+
+// ── logout revoke-current ─────────────────────────────────────────────────────
+
+describe('haszno logout revoke-current', () => {
+  it('calls POST /api/v1/auth/tokens/revoke-current before deleting local token', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'haszno-logout-rev-test-'))
+    const cfgPath = join(tmp, 'config.json')
+    try {
+      writeConfigFile({ apiKey: TOKEN, apiUrl: BASE }, cfgPath)
+
+      const calls: FetchCall[] = []
+      const fn = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({ url: String(url), init: init ?? {} })
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }) as unknown as typeof fetch
+
+      const prog = new Command().name('haszno').option('--json').exitOverride()
+      registerAccountCommands(prog, makeStubClient(), {
+        configPath: cfgPath,
+        httpOpts: { fetch: fn as typeof fetch, readConfig: noConfig },
+      })
+
+      const cap = captureOutput()
+      try {
+        await prog.parseAsync(['logout'], { from: 'user' })
+        // Should have called revoke-current
+        const revokeCall = calls.find((c) => String(c.url).includes('revoke-current'))
+        expect(revokeCall).toBeDefined()
+        expect(revokeCall!.init.method).toBe('POST')
+        // Local token removed
+        const cfg = readConfigFile(cfgPath)
+        expect(cfg.apiKey).toBeUndefined()
+        expect(cap.text()).toContain('Kijelentkezve')
+      } finally { cap.restore() }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('still removes local token even when server revoke fails', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'haszno-logout-rev-fail-test-'))
+    const cfgPath = join(tmp, 'config.json')
+    try {
+      writeConfigFile({ apiKey: TOKEN, apiUrl: BASE }, cfgPath)
+
+      const fn = vi.fn(async () => new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 })) as unknown as typeof fetch
+
+      const prog = new Command().name('haszno').option('--json').exitOverride()
+      registerAccountCommands(prog, makeStubClient(), {
+        configPath: cfgPath,
+        httpOpts: { fetch: fn as typeof fetch, readConfig: noConfig, maxRetries: 1 },
+      })
+
+      const cap = captureOutput()
+      try {
+        await prog.parseAsync(['logout'], { from: 'user' })
+        // Local token still removed
+        const cfg = readConfigFile(cfgPath)
+        expect(cfg.apiKey).toBeUndefined()
+        expect(cap.text()).toContain('Kijelentkezve')
+        // Warning about server failure
+        expect(cap.errText()).toContain('Figyelmeztetés')
+      } finally { cap.restore() }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})

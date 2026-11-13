@@ -8,6 +8,7 @@
  *   haszno shop show <id>               Hirdetés részletei
  *   haszno shop price-hint              Árjavaslat kategória alapján
  *   haszno shop post                    Új hirdetés feladása
+ *   haszno shop post-bulk <fájl|könyvtár>  Tömeges hirdetésfeladás CSV vagy könyvtárból
  *   haszno shop my                      Saját hirdetések
  *   haszno shop edit <id>               Hirdetés szerkesztése
  *   haszno shop pause <id>              Hirdetés szüneteltetése
@@ -17,20 +18,37 @@
  *   haszno shop delete <id>             Hirdetés törlése
  *   haszno shop inquiries               Beérkezett üzenetek listája
  *   haszno shop inquire <adId>          Üzenet küldése eladónak
+ *   haszno shop inquiry reply <id>      Válasz küldése érdeklődőnek (eladóként)
  *   haszno shop favorite <adId>         Hirdetés mentése kedvencekbe
  *   haszno shop unfavorite <adId>       Hirdetés eltávolítása kedvencekből
  *   haszno shop favorites               Kedvenc hirdetések listája
+ *   haszno shop watch <adId>            Áresés-értesítő feliratkozás hirdetésre
+ *   haszno shop unwatch <adId>          Áresés-értesítő leiratkozás
+ *   haszno shop saved-search list       Mentett keresések listája
+ *   haszno shop saved-search add        Új mentett keresés
+ *   haszno shop saved-search remove <id>  Mentett keresés törlése
+ *   haszno shop import-url <url>        Hirdetés importálása URL-ből
+ *   haszno shop draft show              Vázlat megjelenítése
+ *   haszno shop draft save              Vázlat mentése (JSON stdin)
+ *   haszno shop draft clear             Vázlat törlése
  *   haszno shop reserve <adId>          Hirdetés lefoglalása
  *   haszno shop reservations            Foglalásaim listája
- *   haszno shop reservation accept <id>    Foglalás elfogadása (eladóként)
- *   haszno shop reservation decline <id>   Foglalás elutasítása (eladóként)
- *   haszno shop reservation cancel <id>    Foglalás lemondása (vevőként)
- *   haszno shop reservation complete <id>  Foglalás teljesítése (eladóként)
+ *   haszno shop reservation accept <id>         Foglalás elfogadása (eladóként)
+ *   haszno shop reservation decline <id>        Foglalás elutasítása (eladóként)
+ *   haszno shop reservation cancel <id>         Foglalás lemondása (vevőként)
+ *   haszno shop reservation complete <id>       Foglalás teljesítése (eladóként)
+ *   haszno shop reservation counter <id>        Ellenajánlat (eladóként)
+ *   haszno shop reservation accept-counter <id> Ellenajánlat elfogadása (vevőként)
+ *   haszno shop reservation messages <id>       Foglalás üzenetei
+ *   haszno shop reservation message <id>        Üzenet küldése a foglaláson
+ *   haszno shop reservation review <id>         Értékelés leadása
  *
  * Note: reserving is free — payment happens directly between buyer and seller.
  */
 
 import { createInterface } from 'node:readline'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, extname } from 'node:path'
 import type { Command } from 'commander'
 import type { HttpOptions } from '../client/http.js'
 import type {
@@ -38,6 +56,7 @@ import type {
   ShopMyAd,
   ShopReservation,
   ShopReservationSimple,
+  ShopSavedSearchFilters,
 } from '../client/shop.js'
 import { handleError, printJson } from './account.js'
 import { HasznoApiError } from '../client/index.js'
@@ -86,8 +105,14 @@ function printReservation(r: ShopReservation | ShopReservationSimple): void {
   if (full.message) {
     process.stdout.write(`    Üzenet:    ${full.message}\n`)
   }
-  if (full.offerPriceGross) {
-    process.stdout.write(`    Ajánlott ár: ${fmt(full.offerPriceGross)}\n`)
+  if (r.offerPriceGross) {
+    process.stdout.write(`    Ajánlott ár:    ${fmt(r.offerPriceGross)}\n`)
+  }
+  if (r.counterPriceGross) {
+    process.stdout.write(`    Ellenajánlat:   ${fmt(r.counterPriceGross)}\n`)
+  }
+  if (r.agreedPriceGross) {
+    process.stdout.write(`    Elfogadott ár:  ${fmt(r.agreedPriceGross)}\n`)
   }
   if (full.buyerPhone) {
     process.stdout.write(`    Vevő tel.:  ${full.buyerPhone}\n`)
@@ -100,6 +125,9 @@ function printReservation(r: ShopReservation | ShopReservationSimple): void {
   }
   if (full.sellerEmail) {
     process.stdout.write(`    Eladó e-mail: ${full.sellerEmail}\n`)
+  }
+  if (full.sellerName) {
+    process.stdout.write(`    Eladó neve:  ${full.sellerName}\n`)
   }
   process.stdout.write(`    Létrehozva: ${r.createdAt}\n`)
 }
@@ -319,6 +347,7 @@ export function registerShopCommands(
     .option('--attr <kulcs=érték>', 'Attribútum (megismételhető)', (v: string, a: string[]) => [...a, v], [] as string[])
     .option('--image <fájl>', 'Képfájl feltöltése (megismételhető)', (v: string, a: string[]) => [...a, v], [] as string[])
     .option('--from-photos', 'AI-javaslatot kér a feltöltött képek alapján')
+    .option('--remove-bg', 'Háttér eltávolítása a feltöltött képekről (AI)')
     .option('--dry-run', 'Csak megjeleníti a kérést, nem küldi el')
     .option('--yes', 'Megerősítés kihagyása')
     .action(
@@ -342,6 +371,7 @@ export function registerShopCommands(
           attr: string[]
           image: string[]
           fromPhotos?: boolean
+          removeBg?: boolean
           dryRun?: boolean
           yes?: boolean
         },
@@ -355,7 +385,17 @@ export function registerShopCommands(
           if (opts.image.length > 0) {
             process.stderr.write(`${opts.image.length} kép feltöltése...\n`)
             for (const filePath of opts.image) {
-              const result = await shopClient.myAds.uploadImage(filePath)
+              const uploaded = await shopClient.myAds.uploadImage(filePath)
+              let result = uploaded
+              if (opts.removeBg) {
+                process.stderr.write(`Háttér eltávolítása: kép #${uploaded.id}...\n`)
+                try {
+                  result = await shopClient.images.removeBg(uploaded.id)
+                } catch (err) {
+                  process.stderr.write(`Figyelmeztetés: háttér-eltávolítás sikertelen (${err instanceof Error ? err.message : String(err)}), eredeti kép használata.\n`)
+                  result = uploaded
+                }
+              }
               imageUrls.push(result.url)
               imageNumericIds.push(result.id)
             }
@@ -846,6 +886,537 @@ export function registerShopCommands(
         const { reservation: r } = await shopClient.reservations.complete(id, body)
         if (getJsonFlag(cmd)) printJson(r)
         else process.stdout.write(`Foglalás #${id} teljesítve.\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── reservation counter ───────────────────────────────────────────────────
+  reservation
+    .command('counter <id>')
+    .description('Ellenajánlat küldése (eladóként, amíg a foglalás függőben van)')
+    .requiredOption('--price <Ft>', 'Ellenajánlott ár (bruttó Ft)')
+    .action(async (idStr: string, opts: { price: string }, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      const price = parseInt(opts.price, 10)
+      if (isNaN(price) || price <= 0) { process.stderr.write('Érvénytelen ár.\n'); process.exit(2); return }
+      try {
+        const { reservation: r } = await shopClient.reservations.counter(id, price)
+        if (getJsonFlag(cmd)) printJson(r)
+        else process.stdout.write(`Ellenajánlat elküldve: ${fmt(price)} (foglalás #${id}).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── reservation accept-counter ─────────────────────────────────────────────
+  reservation
+    .command('accept-counter <id>')
+    .description('Eladói ellenajánlat elfogadása (vevőként)')
+    .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      try {
+        const { reservation: r } = await shopClient.reservations.acceptCounter(id)
+        if (getJsonFlag(cmd)) printJson(r)
+        else process.stdout.write(`Ellenajánlat elfogadva (foglalás #${id}).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── reservation messages ──────────────────────────────────────────────────
+  reservation
+    .command('messages <id>')
+    .description('Foglalás üzenetei')
+    .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      try {
+        const { items } = await shopClient.reservations.messages(id)
+        if (getJsonFlag(cmd)) {
+          printJson(items)
+        } else {
+          if (items.length === 0) { process.stdout.write('Nincs üzenet.\n'); return }
+          for (const m of items) {
+            const who = m.author === 'buyer' ? 'Vevő' : 'Eladó'
+            process.stdout.write(`  [${m.createdAt.slice(0, 16)}] ${who}: ${m.body}\n`)
+          }
+        }
+      } catch (err) { handleError(err) }
+    })
+
+  // ── reservation message ───────────────────────────────────────────────────
+  reservation
+    .command('message <id>')
+    .description('Üzenet küldése a foglaláson')
+    .requiredOption('--text <szöveg>', 'Üzenet szövege (1–2000 karakter)')
+    .action(async (idStr: string, opts: { text: string }, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (!opts.text.trim()) { process.stderr.write('--text megadása kötelező.\n'); process.exit(2); return }
+      try {
+        const { message: m } = await shopClient.reservations.message(id, opts.text)
+        if (getJsonFlag(cmd)) printJson(m)
+        else process.stdout.write(`Üzenet elküldve (#${m.id}).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── reservation review ────────────────────────────────────────────────────
+  reservation
+    .command('review <id>')
+    .description('Értékelés leadása teljesített foglalásra')
+    .requiredOption('--rating <1-5>', 'Értékelés (1–5 csillag)')
+    .option('--comment <szöveg>', 'Szöveges megjegyzés (max. 1000 karakter)')
+    .action(async (idStr: string, opts: { rating: string; comment?: string }, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      const rating = parseInt(opts.rating, 10)
+      if (isNaN(rating) || rating < 1 || rating > 5) {
+        process.stderr.write('--rating értéke 1 és 5 közé kell essen.\n')
+        process.exit(2)
+        return
+      }
+      try {
+        const { review } = await shopClient.reservations.review(id, rating, opts.comment)
+        if (getJsonFlag(cmd)) printJson(review)
+        else process.stdout.write(`Értékelés leadva: ${rating} csillag (foglalás #${id}).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── inquiry reply ─────────────────────────────────────────────────────────
+  const inquiry = shop
+    .command('inquiry')
+    .description('Érdeklődés kezelése (eladóként)')
+
+  inquiry
+    .command('reply <id>')
+    .description('Válasz küldése érdeklődőnek (eladóként)')
+    .requiredOption('--message <szöveg>', 'Válasz szövege (1–2000 karakter)')
+    .action(async (idStr: string, opts: { message: string }, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (!opts.message.trim()) { process.stderr.write('--message megadása kötelező.\n'); process.exit(2); return }
+      try {
+        const { reply } = await shopClient.inquiries.reply(id, opts.message)
+        if (getJsonFlag(cmd)) printJson(reply)
+        else process.stdout.write(`Válasz elküldve az érdeklődőnek (érdeklődés #${reply.inquiryId}).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── saved-search ──────────────────────────────────────────────────────────
+  const savedSearch = shop
+    .command('saved-search')
+    .description('Mentett keresések kezelése')
+
+  savedSearch
+    .command('list')
+    .description('Mentett keresések listája')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const items = await shopClient.savedSearches.list()
+        if (getJsonFlag(cmd)) {
+          printJson(items)
+        } else {
+          if (items.length === 0) { process.stdout.write('Nincs mentett keresés.\n'); return }
+          for (const s of items) {
+            const alert = s.alertEnabled ? ' [értesítő: be]' : ''
+            process.stdout.write(`  #${s.id}  ${s.name}${alert}\n`)
+            const f = s.filters
+            const parts: string[] = []
+            if (f.q) parts.push(`„${f.q}"`)
+            if (f.cat) parts.push(`kat:${f.cat}`)
+            if (f.sub) parts.push(`alkat:${f.sub}`)
+            if (f.min != null) parts.push(`min ${fmt(f.min)}`)
+            if (f.max != null) parts.push(`max ${fmt(f.max)}`)
+            if (f.county) parts.push(f.county)
+            if (f.cond) parts.push(f.cond)
+            if (parts.length > 0) process.stdout.write(`       ${parts.join(', ')}\n`)
+          }
+        }
+      } catch (err) { handleError(err) }
+    })
+
+  savedSearch
+    .command('add')
+    .description('Új mentett keresés (ugyanazok a szűrők, mint a "search" parancsnál)')
+    .requiredOption('--name <név>', 'A mentett keresés neve')
+    .option('--query <szöveg>', 'Keresőszöveg')
+    .option('--category <id>', 'Kategória')
+    .option('--subcategory <id>', 'Alkategória')
+    .option('--min-price <Ft>', 'Minimum ár')
+    .option('--max-price <Ft>', 'Maximum ár')
+    .option('--county <megye>', 'Megye')
+    .option('--condition <állapot>', 'Állapot: uj | ujszeru | hasznalt | serult')
+    .option('--no-alert', 'E-mail értesítő kikapcsolása (alapért.: be)')
+    .action(async (opts: {
+      name: string
+      query?: string
+      category?: string
+      subcategory?: string
+      minPrice?: string
+      maxPrice?: string
+      county?: string
+      condition?: string
+      alert: boolean
+    }, cmd: Command) => {
+      const filters: ShopSavedSearchFilters = {}
+      if (opts.query) filters.q = opts.query
+      if (opts.category) filters.cat = opts.category
+      if (opts.subcategory) filters.sub = opts.subcategory
+      if (opts.minPrice) filters.min = parseInt(opts.minPrice, 10)
+      if (opts.maxPrice) filters.max = parseInt(opts.maxPrice, 10)
+      if (opts.county) filters.county = opts.county
+      if (opts.condition) filters.cond = opts.condition
+      try {
+        const s = await shopClient.savedSearches.add({ name: opts.name, filters, alertEnabled: opts.alert !== false })
+        if (getJsonFlag(cmd)) printJson(s)
+        else process.stdout.write(`Mentett keresés létrehozva: #${s.id}  ${s.name}\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  savedSearch
+    .command('remove <id>')
+    .description('Mentett keresés törlése')
+    .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      try {
+        const result = await shopClient.savedSearches.remove(id)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Mentett keresés #${id} törölve.\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── watch / unwatch ───────────────────────────────────────────────────────
+  shop
+    .command('watch <adId>')
+    .description('Feliratkozás áresés-értesítőre egy hirdetésnél')
+    .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
+      const adId = parseInt(adIdStr, 10)
+      if (isNaN(adId)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      try {
+        const result = await shopClient.watch.watch(adId)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Hirdetés #${adId} áresés-értesítőre feliratkozva.\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  shop
+    .command('unwatch <adId>')
+    .description('Leiratkozás áresés-értesítőről')
+    .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
+      const adId = parseInt(adIdStr, 10)
+      if (isNaN(adId)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      try {
+        const result = await shopClient.watch.unwatch(adId)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Hirdetés #${adId} áresés-értesítőről leiratkozva.\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── import-url ────────────────────────────────────────────────────────────
+  shop
+    .command('import-url <url>')
+    .description('Hirdetés importálása URL-ből (kinyeri a metaadatokat)')
+    .option('--post', 'Importált adatok alapján hirdetést ad fel (interaktív)')
+    .option('--yes', 'Megerősítés kihagyása (csak --post-tal)')
+    .action(async (url: string, opts: { post?: boolean; yes?: boolean }, cmd: Command) => {
+      try {
+        process.stderr.write('URL elemzése...\n')
+        const data = await shopClient.urlImport.importUrl(url)
+        if (getJsonFlag(cmd)) {
+          printJson(data)
+          return
+        }
+        process.stdout.write('Kinyert adatok:\n')
+        if (data.title) process.stdout.write(`  Cím:      ${data.title}\n`)
+        if (data.price) process.stdout.write(`  Ár:       ${fmt(data.price)}\n`)
+        if (data.description) {
+          process.stdout.write(`  Leírás:   ${data.description.slice(0, 120)}${data.description.length > 120 ? '…' : ''}\n`)
+        }
+        if (data.images.length > 0) {
+          process.stdout.write(`  Képek:    ${data.images.length} db\n`)
+        }
+        if (Object.keys(data.parsed).length > 0) {
+          process.stdout.write('  Elemzett:\n')
+          for (const [k, v] of Object.entries(data.parsed)) {
+            process.stdout.write(`    ${k}: ${v}\n`)
+          }
+        }
+        if (opts.post) {
+          if (!opts.yes) {
+            const ok = await askConfirm('Hirdetést adsz fel ezekkel az adatokkal?')
+            if (!ok) { process.stdout.write('Megszakítva.\n'); process.exit(0); return }
+          }
+          // Build body from extracted data and post
+          const body: Record<string, unknown> = {
+            title: data.title ?? '',
+            description: data.description ?? '',
+            priceGross: data.price ?? null,
+            negotiable: false,
+            condition: 'hasznalt',
+            county: '',
+            city: '',
+            category: '',
+            images: data.images,
+            attrs: {},
+            contactName: '',
+            contactPhone: null,
+            contactEmail: '',
+            showPhone: false,
+            resellable: false,
+            partnerCommissionPct: 0,
+          }
+          if (!body.title) {
+            process.stderr.write('Nem sikerült automatikusan feladni: cím hiányzik. Adj meg --title és a kötelező mezőket kézzel a "haszno shop post" paranccsal.\n')
+            process.exit(2)
+            return
+          }
+          const ad = await shopClient.myAds.post(body as unknown as Parameters<typeof shopClient.myAds.post>[0])
+          process.stdout.write(`Hirdetés feladva: #${ad.id}  ${ad.title}\n`)
+        }
+      } catch (err) { handleError(err) }
+    })
+
+  // ── draft ─────────────────────────────────────────────────────────────────
+  const draft = shop
+    .command('draft')
+    .description('Hirdetésvázlat kezelése (szerver oldal)')
+
+  draft
+    .command('show')
+    .description('Aktuális vázlat megjelenítése')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const d = await shopClient.draft.show()
+        if (getJsonFlag(cmd)) {
+          printJson(d)
+        } else {
+          if (!d) { process.stdout.write('Nincs mentett vázlat.\n'); return }
+          process.stdout.write(`Vázlat (mentve: ${d.updatedAt}):\n`)
+          printJson(d.payload)
+        }
+      } catch (err) { handleError(err) }
+    })
+
+  draft
+    .command('save')
+    .description('Vázlat mentése (JSON a stdin-ről)')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        process.stderr.write('JSON beolvasása (stdin)...\n')
+        const chunks: Buffer[] = []
+        for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+        const rawText = Buffer.concat(chunks).toString('utf8').trim()
+        if (!rawText) { process.stderr.write('Üres bemenet.\n'); process.exit(2); return }
+        let payload: Record<string, unknown>
+        try {
+          payload = JSON.parse(rawText) as Record<string, unknown>
+        } catch {
+          process.stderr.write('Érvénytelen JSON.\n')
+          process.exit(2)
+          return
+        }
+        const d = await shopClient.draft.save(payload)
+        if (getJsonFlag(cmd)) printJson(d)
+        else process.stdout.write(`Vázlat mentve (${d.updatedAt}).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  draft
+    .command('clear')
+    .description('Vázlat törlése')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const result = await shopClient.draft.clear()
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write('Vázlat törölve.\n')
+      } catch (err) { handleError(err) }
+    })
+
+  // ── post-bulk ─────────────────────────────────────────────────────────────
+  shop
+    .command('post-bulk <forrás>')
+    .description('Tömeges hirdetésfeladás CSV fájlból vagy könyvtárból')
+    .option('--from-photos', 'Könyvtár mód: alkönyvtáranként egy hirdetés, AI-javaslat képekből')
+    .option('--dry-run', 'Csak előnézet, nem ad fel')
+    .option('--yes', 'Megerősítés kihagyása (kötelező az éles feltöltéshez)')
+    .action(async (source: string, opts: { fromPhotos?: boolean; dryRun?: boolean; yes?: boolean }, cmd: Command) => {
+      try {
+        type BulkAdRow = {
+          title: string
+          category: string
+          subcategory?: string
+          price?: string
+          negotiable?: string
+          condition: string
+          description?: string
+          county: string
+          city: string
+          contact_name: string
+          contact_phone?: string
+          contact_email: string
+          show_phone?: string
+          images?: string
+        }
+        let rows: BulkAdRow[] = []
+
+        // Determine if source is a directory or CSV file
+        let isDirectory = false
+        try { isDirectory = statSync(source).isDirectory() } catch { /* will error below */ }
+
+        if (opts.fromPhotos || isDirectory) {
+          // Directory mode: each subdirectory is one ad's photos
+          let entries: string[]
+          try {
+            entries = readdirSync(source).filter((e) => {
+              try { return statSync(join(source, e)).isDirectory() } catch { return false }
+            })
+          } catch (err) {
+            process.stderr.write(`Nem sikerült beolvasni a könyvtárat: ${err instanceof Error ? err.message : String(err)}\n`)
+            process.exit(2)
+            return
+          }
+          if (entries.length === 0) {
+            process.stderr.write('Nincs alkönyvtár a megadott könyvtárban.\n')
+            process.exit(2)
+            return
+          }
+          // Build placeholder rows for each subdirectory (actual data from AI)
+          rows = entries.map((e) => ({
+            title: e,
+            category: '',
+            condition: 'hasznalt',
+            county: '',
+            city: '',
+            contact_name: '',
+            contact_email: '',
+            images: join(source, e),
+          }))
+        } else {
+          // CSV mode
+          let csvText: string
+          try {
+            csvText = readFileSync(source, 'utf8')
+          } catch (err) {
+            process.stderr.write(`Nem sikerült beolvasni a CSV fájlt: ${err instanceof Error ? err.message : String(err)}\n`)
+            process.exit(2)
+            return
+          }
+          const lines = csvText.split('\n').map((l) => l.trim()).filter(Boolean)
+          if (lines.length < 2) {
+            process.stderr.write('A CSV fájl üres vagy csak fejlécet tartalmaz.\n')
+            process.exit(2)
+            return
+          }
+          const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''))
+          rows = lines.slice(1).map((line) => {
+            // Simple CSV parsing (no quoted fields with commas)
+            const values = line.split(',').map((v) => v.trim().replace(/^"|"$/g, ''))
+            const obj: Record<string, string> = {}
+            headers.forEach((h, i) => { obj[h] = values[i] ?? '' })
+            return obj as unknown as BulkAdRow
+          })
+        }
+
+        // Print preview table
+        process.stdout.write(`\nElőnézet — ${rows.length} hirdetés:\n`)
+        process.stdout.write('  #   Cím'.padEnd(45) + '  Kategória  Ár\n')
+        process.stdout.write('  ' + '-'.repeat(60) + '\n')
+        rows.forEach((r, i) => {
+          const price = r.price ? fmt(parseInt(r.price, 10)) : '—'
+          process.stdout.write(`  ${String(i + 1).padStart(3)}  ${r.title.slice(0, 36).padEnd(36)}  ${(r.category || '—').padEnd(10)}  ${price}\n`)
+        })
+
+        if (opts.dryRun) {
+          process.stdout.write('\n(dry-run: nem lett feladva)\n')
+          return
+        }
+
+        if (!opts.yes) {
+          const ok = await askConfirm(`\nFeladod mind a ${rows.length} hirdetést?`)
+          if (!ok) { process.stdout.write('Megszakítva.\n'); process.exit(0); return }
+        }
+
+        let posted = 0
+        for (const row of rows) {
+          try {
+            if (opts.fromPhotos || isDirectory) {
+              // Directory mode: upload photos from subdirectory, then use AI to generate data
+              const dirPath = row.images ?? ''
+              let imageFiles: string[] = []
+              try {
+                imageFiles = readdirSync(dirPath)
+                  .filter((f) => ['.jpg', '.jpeg', '.png', '.webp'].includes(extname(f).toLowerCase()))
+                  .map((f) => join(dirPath, f))
+              } catch { /* no images */ }
+
+              const imageUrls: string[] = []
+              const imageIds: number[] = []
+              for (const imgFile of imageFiles) {
+                const uploaded = await shopClient.myAds.uploadImage(imgFile)
+                imageUrls.push(uploaded.url)
+                imageIds.push(uploaded.id)
+              }
+
+              let aiSuggest: Record<string, unknown> = {}
+              if (imageIds.length > 0) {
+                process.stderr.write(`AI-javaslat kérése (${row.title})...\n`)
+                aiSuggest = await shopClient.myAds.fromPhotos(imageIds) as Record<string, unknown>
+              }
+
+              const title = aiSuggest.title as string || row.title
+              const body = {
+                title,
+                category: (aiSuggest.categoryId as string) || row.category || 'egyeb',
+                subcategory: (aiSuggest.subcategoryId as string | undefined) ?? null,
+                priceGross: aiSuggest.suggestedPriceGross as number | null ?? null,
+                negotiable: false,
+                condition: (aiSuggest.condition as string) || row.condition || 'hasznalt',
+                county: row.county || '',
+                city: row.city || '',
+                description: (aiSuggest.description as string) || row.description || '',
+                images: imageUrls,
+                attrs: (aiSuggest.attrs as Record<string, string | number | boolean>) || {},
+                contactName: row.contact_name || '',
+                contactPhone: row.contact_phone || null,
+                contactEmail: row.contact_email || '',
+                showPhone: false,
+                resellable: false,
+                partnerCommissionPct: 0,
+              }
+              const ad = await shopClient.myAds.post(body as Parameters<typeof shopClient.myAds.post>[0])
+              process.stdout.write(`  ✓ Feladva: #${ad.id}  ${ad.title}\n`)
+            } else {
+              // CSV mode
+              const body = {
+                title: row.title,
+                category: row.category,
+                subcategory: row.subcategory || null,
+                priceGross: row.price ? parseInt(row.price, 10) : null,
+                negotiable: row.negotiable === 'true' || row.negotiable === '1',
+                condition: row.condition || 'hasznalt',
+                county: row.county,
+                city: row.city,
+                description: row.description || '',
+                images: [],
+                attrs: {},
+                contactName: row.contact_name,
+                contactPhone: row.contact_phone || null,
+                contactEmail: row.contact_email,
+                showPhone: row.show_phone === 'true' || row.show_phone === '1',
+                resellable: false,
+                partnerCommissionPct: 0,
+              }
+              const ad = await shopClient.myAds.post(body as Parameters<typeof shopClient.myAds.post>[0])
+              process.stdout.write(`  ✓ Feladva: #${ad.id}  ${ad.title}\n`)
+            }
+            posted++
+          } catch (err) {
+            const msg = err instanceof HasznoApiError ? `HTTP ${err.status}: ${err.message}` : String(err)
+            process.stdout.write(`  ✗ Hiba (${row.title}): ${msg}\n`)
+            process.stdout.write(`\nMegállás az első hibánál. Feladva: ${posted}/${rows.length}\n`)
+            process.exit(1)
+            return
+          }
+        }
+        process.stdout.write(`\nKész. Feladva: ${posted}/${rows.length} hirdetés.\n`)
       } catch (err) { handleError(err) }
     })
 }

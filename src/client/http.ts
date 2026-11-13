@@ -40,7 +40,7 @@ export interface HttpOptions {
 }
 
 /** CLI version for User-Agent */
-const CLI_VERSION = '0.1.0'
+const CLI_VERSION = '0.3.0'
 
 function buildAuthHeader(conn: Connection): Record<string, string> {
   // Never print credentials.
