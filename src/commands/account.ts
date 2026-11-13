@@ -171,7 +171,8 @@ export function registerAccountCommands(
         cmd: Command,
       ) => {
         const globals = (cmd?.optsWithGlobals() ?? {}) as { apiUrl?: string }
-        const apiUrl = opts.apiUrl ?? globals.apiUrl
+        // A token ahhoz a szerverhez tartozik, ahol kiadták: a környezeti változóból jövő URL-t is elmentjük.
+        const apiUrl = opts.apiUrl ?? globals.apiUrl ?? (process.env['HASZNO_API_URL'] || undefined)
 
         // Read credentials from env or interactive prompt
         let email = process.env['HASZNO_EMAIL'] ?? ''

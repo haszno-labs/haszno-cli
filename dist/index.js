@@ -2198,7 +2198,7 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH, 
   program2.command("login").description("Bejelentkez\xE9s e-mail/jelsz\xF3val; az API-token elment\xE9se (~/.config/haszno/config.json)").option("--api-url <url>", "Haszno API alap URL-je (env: HASZNO_API_URL)").option("--label <name>", 'Token neve (alap\xE9rt.: "CLI")', "CLI").option("--show-token", "Token megjelen\xEDt\xE9se ment\xE9s ut\xE1n").action(
     async (opts, cmd) => {
       const globals = cmd?.optsWithGlobals() ?? {};
-      const apiUrl = opts.apiUrl ?? globals.apiUrl;
+      const apiUrl = opts.apiUrl ?? globals.apiUrl ?? (process.env["HASZNO_API_URL"] || void 0);
       let email = process.env["HASZNO_EMAIL"] ?? "";
       let password = process.env["HASZNO_PASSWORD"] ?? "";
       if (!email || !password) {
