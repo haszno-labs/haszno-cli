@@ -7,8 +7,7 @@
  * Authentication: session cookie or Bearer token (haszno_...) from `haszno login`.
  */
 import { readFileSync } from 'node:fs'
-import { basename } from 'node:path'
-import { type HttpOptions, get, post, patch, del, isShopToken } from './http.js'
+import { type HttpOptions, get, post, put, del, isShopToken } from './http.js'
 import { resolveConnection } from './config.js'
 import { HasznoApiError } from './error.js'
 
@@ -17,26 +16,48 @@ const CLI_VERSION = '0.1.0'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface ShopAdImage {
-  id: string
-  url: string
+export interface ShopAttrDef {
+  key: string
+  label: string
+  type: 'select' | 'number' | 'bool' | 'text' | string
+  required?: boolean
+  options?: Array<{ value: string; label: string } | string>
+}
+
+export interface ShopTaxonomySub {
+  key: string
+  label: string
+  attrs: ShopAttrDef[]
+}
+
+export interface ShopTaxonomyCategory {
+  key: string
+  label: string
+  emoji: string
+  subcategories: ShopTaxonomySub[]
+  attrs: ShopAttrDef[]
+}
+
+export interface ShopTaxonomy {
+  categories: ShopTaxonomyCategory[]
+  counties: string[]
 }
 
 export interface ShopAd {
   id: number
   title: string
   description: string | null
-  categoryId: string | null
-  subcategoryId: string | null
-  priceGross: number
+  category: string
+  subcategory: string | null
+  priceGross: number | null
   negotiable: boolean
-  condition: string | null
-  county: string | null
-  city: string | null
-  status: 'aktiv' | 'szunetel' | 'eladva' | 'torolt' | string
+  condition: string
+  county: string
+  city: string
+  status: 'aktiv' | 'szunetel' | 'eladva' | 'torolve' | string
   reserved: boolean
-  images: ShopAdImage[]
-  attributes: Record<string, string>
+  images: string[]
+  attrs: Record<string, string | number | boolean>
   contactName: string | null
   contactPhone: string | null
   showPhone: boolean
@@ -44,38 +65,27 @@ export interface ShopAd {
   updatedAt: string
 }
 
+/** Seller's own ad — richer than the public AdSummary */
+export interface ShopMyAd extends ShopAd {
+  contactEmail: string
+  resellable: boolean
+  partnerCommissionPct: number
+  inquiryCount?: number
+  unreadInquiries?: number
+  expiresAt?: string | null
+  soldAt?: string | null
+  soldPriceGross?: number | null
+}
+
 export interface ShopAdDetail extends ShopAd {
   viewCount?: number
   favoriteCount?: number
 }
 
-export interface ShopCategory {
-  id: string
-  name: string
-  subcategories: ShopSubcategory[]
-}
-
-export interface ShopSubcategory {
-  id: string
-  name: string
-  requiredAttributes: ShopAttributeDef[]
-}
-
-export interface ShopAttributeDef {
-  key: string
-  label: string
-  type: 'string' | 'select' | 'integer' | 'boolean'
-  options?: string[]
-  required?: boolean
-}
-
 export interface ShopPriceHint {
-  categoryId: string | null
-  subcategoryId: string | null
-  suggestedMin: number | null
-  suggestedMax: number | null
-  suggestedMid: number | null
-  recentCount: number
+  p25: number
+  p75: number
+  count: number
 }
 
 export interface ShopReservationAd {
@@ -120,16 +130,18 @@ export interface ShopReservationSimple {
 export interface ShopInquiry {
   id: number
   adId: number
-  ad?: { id: number; title: string }
+  adTitle?: string
+  name: string
+  email: string
+  phone?: string | null
   message: string
-  senderName: string
-  senderEmail: string | null
-  createdAt: string
+  viaPartner?: string | null
   readAt: string | null
+  createdAt: string
 }
 
 export interface ShopImageUploadResult {
-  imageId: string
+  id: number
   url: string
 }
 
@@ -140,7 +152,7 @@ export interface ShopFromPhotosResult {
   subcategoryId?: string
   condition?: string
   suggestedPriceGross?: number
-  attributes?: Record<string, string>
+  attrs?: Record<string, string | number | boolean>
 }
 
 export interface ShopAdListResult {
@@ -159,20 +171,23 @@ export interface ShopFavoriteResult {
 }
 
 export interface ShopAdPostBody {
+  category: string
+  subcategory?: string | null
   title: string
-  categoryId?: string
-  subcategoryId?: string
-  priceGross: number
-  negotiable?: boolean
-  condition?: string
-  description?: string
-  county?: string
-  city?: string
-  attributes?: Record<string, string>
-  imageIds?: string[]
-  contactName?: string
-  contactPhone?: string
-  showPhone?: boolean
+  description: string
+  priceGross: number | null
+  negotiable: boolean
+  condition: 'uj' | 'ujszeru' | 'hasznalt' | 'serult'
+  county: string
+  city: string
+  images: string[]
+  attrs?: Record<string, string | number | boolean>
+  contactName: string
+  contactPhone?: string | null
+  contactEmail: string
+  showPhone: boolean
+  resellable: boolean
+  partnerCommissionPct: number
 }
 
 export interface ShopAdSearchParams {
@@ -181,6 +196,7 @@ export interface ShopAdSearchParams {
   subcategory?: string
   minPrice?: number
   maxPrice?: number
+  condition?: string
   county?: string
   city?: string
   sort?: 'newest' | 'price_asc' | 'price_desc'
@@ -200,8 +216,9 @@ export interface ShopLoginResult {
 // ── Multipart upload helper ───────────────────────────────────────────────────
 
 /**
- * Upload a single image file to the shop image endpoint (multipart/form-data).
- * Returns the uploaded image's id and url.
+ * Upload a single image file to the shop image endpoint (raw binary body).
+ * The API reads c.req.arrayBuffer() and infers the MIME type from magic bytes.
+ * Returns the uploaded image's numeric id and url.
  */
 export async function uploadShopImage(
   filePath: string,
@@ -210,12 +227,15 @@ export async function uploadShopImage(
   const conn = resolveConnection(opts, process.env, opts.readConfig)
   const fetchFn = opts.fetch ?? fetch
   const fileContent = readFileSync(filePath)
-  const filename = basename(filePath)
 
-  const form = new FormData()
-  form.append('image', new Blob([fileContent]), filename)
+  // Detect content-type from magic bytes (jpg / png / gif / webp; default to jpeg)
+  let contentType = 'image/jpeg'
+  if (fileContent[0] === 0x89 && fileContent[1] === 0x50) contentType = 'image/png'
+  else if (fileContent[0] === 0x47 && fileContent[1] === 0x49) contentType = 'image/gif'
+  else if (fileContent[0] === 0x52 && fileContent[1] === 0x49 && fileContent[8] === 0x57) contentType = 'image/webp'
 
   const headers: Record<string, string> = {
+    'Content-Type': contentType,
     'User-Agent': `haszno-cli/${CLI_VERSION}`,
     Accept: 'application/json',
   }
@@ -230,8 +250,8 @@ export async function uploadShopImage(
     headers['Authorization'] = `Basic ${Buffer.from(conn.basicAuth).toString('base64')}`
   }
 
-  const url = `${conn.baseUrl}/api/v1/shop/my/images`
-  const response = await fetchFn(url, { method: 'POST', headers, body: form })
+  const url = `${conn.baseUrl}/api/v1/shop/images`
+  const response = await fetchFn(url, { method: 'POST', headers, body: fileContent })
   if (!response.ok) {
     let message = `HTTP ${response.status}`
     try {
@@ -286,28 +306,28 @@ export async function cliLogin(
 
 export interface ShopHasznoClient {
   categories: {
-    list(): Promise<ShopCategory[]>
+    list(): Promise<ShopTaxonomyCategory[]>
   }
   ads: {
     search(params?: ShopAdSearchParams): Promise<ShopAdListResult>
     get(id: number): Promise<ShopAdDetail>
-    priceHint(params?: { categoryId?: string; subcategoryId?: string }): Promise<ShopPriceHint>
+    priceHint(params?: { category?: string; subcategory?: string }): Promise<ShopPriceHint | null>
   }
   myAds: {
-    list(): Promise<ShopAd[]>
-    post(body: ShopAdPostBody): Promise<ShopAd>
-    edit(id: number, body: Partial<ShopAdPostBody>): Promise<ShopAd>
-    pause(id: number): Promise<ShopAd>
-    activate(id: number): Promise<ShopAd>
-    sold(id: number, body?: { soldPriceGross?: number }): Promise<ShopAd>
-    renew(id: number): Promise<ShopAd>
-    delete(id: number): Promise<{ deleted: boolean }>
+    list(): Promise<ShopMyAd[]>
+    post(body: ShopAdPostBody): Promise<ShopMyAd>
+    edit(id: number, body: Partial<ShopAdPostBody>): Promise<ShopMyAd>
+    pause(id: number): Promise<ShopMyAd>
+    activate(id: number): Promise<ShopMyAd>
+    sold(id: number, body?: { soldPriceGross?: number }): Promise<ShopMyAd>
+    renew(id: number): Promise<ShopMyAd>
+    delete(id: number): Promise<ShopMyAd>
     uploadImage(filePath: string): Promise<ShopImageUploadResult>
-    fromPhotos(imageIds: string[]): Promise<ShopFromPhotosResult>
+    fromPhotos(imageIds: number[]): Promise<ShopFromPhotosResult>
   }
   inquiries: {
     listReceived(): Promise<ShopInquiry[]>
-    send(adId: number, body: { message: string }): Promise<ShopInquiry>
+    send(adId: number, body: { name: string; email: string; phone?: string; message: string }): Promise<{ ok: boolean }>
   }
   favorites: {
     list(): Promise<ShopAd[]>
@@ -331,61 +351,98 @@ export interface ShopHasznoClient {
   }
 }
 
+const SORT_MAP: Record<string, string> = {
+  newest: 'uj',
+  price_asc: 'ar_nov',
+  price_desc: 'ar_csokk',
+}
+
 export function createShopClient(opts: HttpOptions): ShopHasznoClient {
   const o = opts
 
   return {
     categories: {
-      list: () => get('/api/v1/shop/categories', o),
+      list: async () => {
+        const taxonomy = await get<ShopTaxonomy>('/api/v1/shop/taxonomy', o)
+        return taxonomy.categories
+      },
     },
 
     ads: {
       search: (params = {}) => {
         const qs = new URLSearchParams()
         if (params.q) qs.set('q', params.q)
-        if (params.category) qs.set('category', params.category)
-        if (params.subcategory) qs.set('subcategory', params.subcategory)
-        if (params.minPrice != null) qs.set('minPrice', String(params.minPrice))
-        if (params.maxPrice != null) qs.set('maxPrice', String(params.maxPrice))
+        if (params.category) qs.set('cat', params.category)
+        if (params.subcategory) qs.set('sub', params.subcategory)
+        if (params.minPrice != null) qs.set('min', String(params.minPrice))
+        if (params.maxPrice != null) qs.set('max', String(params.maxPrice))
+        if (params.condition) qs.set('cond', params.condition)
         if (params.county) qs.set('county', params.county)
         if (params.city) qs.set('city', params.city)
-        if (params.sort) qs.set('sort', params.sort)
+        if (params.sort) qs.set('sort', SORT_MAP[params.sort] ?? params.sort)
         if (params.page != null) qs.set('page', String(params.page))
         const suffix = qs.toString() ? `?${qs.toString()}` : ''
         return get(`/api/v1/shop/ads${suffix}`, o)
       },
       get: (id) => get(`/api/v1/shop/ads/${id}`, o),
-      priceHint: (params = {}) => {
+      priceHint: async (params = {}) => {
         const qs = new URLSearchParams()
-        if (params.categoryId) qs.set('categoryId', params.categoryId)
-        if (params.subcategoryId) qs.set('subcategoryId', params.subcategoryId)
+        if (params.category) qs.set('cat', params.category)
+        if (params.subcategory) qs.set('sub', params.subcategory)
         const suffix = qs.toString() ? `?${qs.toString()}` : ''
-        return get(`/api/v1/shop/price-hint${suffix}`, o)
+        return get(`/api/v1/shop/assist/price-hint${suffix}`, o)
       },
     },
 
     myAds: {
       list: () => get('/api/v1/shop/my/ads', o),
-      post: (body) => post('/api/v1/shop/my/ads', body, o),
-      edit: (id, body) => patch(`/api/v1/shop/my/ads/${id}`, body, o),
-      pause: (id) => post(`/api/v1/shop/my/ads/${id}/pause`, null, o),
-      activate: (id) => post(`/api/v1/shop/my/ads/${id}/activate`, null, o),
-      sold: (id, body = {}) => post(`/api/v1/shop/my/ads/${id}/sold`, body, o),
-      renew: (id) => post(`/api/v1/shop/my/ads/${id}/renew`, null, o),
-      delete: (id) => del(`/api/v1/shop/my/ads/${id}`, o),
+      post: (body) => post('/api/v1/shop/ads', body, o),
+      edit: async (id, partial) => {
+        // PUT requires the full adInputSchema body — fetch current ad and merge
+        const existing = await get<ShopMyAd>(`/api/v1/shop/my/ads/${id}`, o)
+        const merged: ShopAdPostBody = {
+          category: existing.category,
+          subcategory: existing.subcategory ?? null,
+          title: existing.title,
+          description: existing.description ?? '',
+          priceGross: existing.priceGross,
+          negotiable: existing.negotiable,
+          condition: existing.condition as ShopAdPostBody['condition'],
+          county: existing.county,
+          city: existing.city,
+          images: existing.images,
+          attrs: existing.attrs,
+          contactName: existing.contactName ?? '',
+          contactPhone: existing.contactPhone ?? null,
+          contactEmail: existing.contactEmail,
+          showPhone: existing.showPhone,
+          resellable: existing.resellable,
+          partnerCommissionPct: existing.partnerCommissionPct,
+          ...partial,
+        }
+        return put(`/api/v1/shop/ads/${id}`, merged, o)
+      },
+      pause: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: 'szunetel' }, o),
+      activate: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: 'aktiv' }, o),
+      sold: (id, body = {}) => post(`/api/v1/shop/ads/${id}/sold`, body, o),
+      renew: (id) => post(`/api/v1/shop/ads/${id}/renew`, null, o),
+      delete: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: 'torolve' }, o),
       uploadImage: (filePath) => uploadShopImage(filePath, o),
       fromPhotos: (imageIds) => post('/api/v1/shop/assist/from-photos', { imageIds }, o),
     },
 
     inquiries: {
-      listReceived: () => get('/api/v1/shop/my/inquiries', o),
+      listReceived: async () => {
+        const result = await get<{ items: ShopInquiry[]; total: number }>('/api/v1/shop/my/inquiries', o)
+        return result.items
+      },
       send: (adId, body) => post(`/api/v1/shop/ads/${adId}/inquiries`, body, o),
     },
 
     favorites: {
       list: () => get('/api/v1/shop/my/favorites', o),
-      add: (adId) => post(`/api/v1/shop/my/favorites/${adId}`, null, o),
-      remove: (adId) => del(`/api/v1/shop/my/favorites/${adId}`, o),
+      add: (adId) => put(`/api/v1/shop/ads/${adId}/favorite`, null, o),
+      remove: (adId) => del(`/api/v1/shop/ads/${adId}/favorite`, o),
     },
 
     reservations: {

@@ -1939,16 +1939,17 @@ import { createInterface as createInterface3 } from "readline";
 
 // src/client/shop.ts
 import { readFileSync as readFileSync2 } from "fs";
-import { basename } from "path";
 var CLI_VERSION2 = "0.1.0";
 async function uploadShopImage(filePath, opts) {
   const conn = resolveConnection(opts, process.env, opts.readConfig);
   const fetchFn = opts.fetch ?? fetch;
   const fileContent = readFileSync2(filePath);
-  const filename = basename(filePath);
-  const form = new FormData();
-  form.append("image", new Blob([fileContent]), filename);
+  let contentType = "image/jpeg";
+  if (fileContent[0] === 137 && fileContent[1] === 80) contentType = "image/png";
+  else if (fileContent[0] === 71 && fileContent[1] === 73) contentType = "image/gif";
+  else if (fileContent[0] === 82 && fileContent[1] === 73 && fileContent[8] === 87) contentType = "image/webp";
   const headers = {
+    "Content-Type": contentType,
     "User-Agent": `haszno-cli/${CLI_VERSION2}`,
     Accept: "application/json"
   };
@@ -1962,8 +1963,8 @@ async function uploadShopImage(filePath, opts) {
   if (conn.basicAuth) {
     headers["Authorization"] = `Basic ${Buffer.from(conn.basicAuth).toString("base64")}`;
   }
-  const url = `${conn.baseUrl}/api/v1/shop/my/images`;
-  const response = await fetchFn(url, { method: "POST", headers, body: form });
+  const url = `${conn.baseUrl}/api/v1/shop/images`;
+  const response = await fetchFn(url, { method: "POST", headers, body: fileContent });
   if (!response.ok) {
     let message = `HTTP ${response.status}`;
     try {
@@ -1999,56 +2000,91 @@ async function cliLogin(body, opts) {
   }
   return response.json();
 }
+var SORT_MAP = {
+  newest: "uj",
+  price_asc: "ar_nov",
+  price_desc: "ar_csokk"
+};
 function createShopClient(opts) {
   const o = opts;
   return {
     categories: {
-      list: () => get("/api/v1/shop/categories", o)
+      list: async () => {
+        const taxonomy = await get("/api/v1/shop/taxonomy", o);
+        return taxonomy.categories;
+      }
     },
     ads: {
       search: (params = {}) => {
         const qs = new URLSearchParams();
         if (params.q) qs.set("q", params.q);
-        if (params.category) qs.set("category", params.category);
-        if (params.subcategory) qs.set("subcategory", params.subcategory);
-        if (params.minPrice != null) qs.set("minPrice", String(params.minPrice));
-        if (params.maxPrice != null) qs.set("maxPrice", String(params.maxPrice));
+        if (params.category) qs.set("cat", params.category);
+        if (params.subcategory) qs.set("sub", params.subcategory);
+        if (params.minPrice != null) qs.set("min", String(params.minPrice));
+        if (params.maxPrice != null) qs.set("max", String(params.maxPrice));
+        if (params.condition) qs.set("cond", params.condition);
         if (params.county) qs.set("county", params.county);
         if (params.city) qs.set("city", params.city);
-        if (params.sort) qs.set("sort", params.sort);
+        if (params.sort) qs.set("sort", SORT_MAP[params.sort] ?? params.sort);
         if (params.page != null) qs.set("page", String(params.page));
         const suffix = qs.toString() ? `?${qs.toString()}` : "";
         return get(`/api/v1/shop/ads${suffix}`, o);
       },
       get: (id) => get(`/api/v1/shop/ads/${id}`, o),
-      priceHint: (params = {}) => {
+      priceHint: async (params = {}) => {
         const qs = new URLSearchParams();
-        if (params.categoryId) qs.set("categoryId", params.categoryId);
-        if (params.subcategoryId) qs.set("subcategoryId", params.subcategoryId);
+        if (params.category) qs.set("cat", params.category);
+        if (params.subcategory) qs.set("sub", params.subcategory);
         const suffix = qs.toString() ? `?${qs.toString()}` : "";
-        return get(`/api/v1/shop/price-hint${suffix}`, o);
+        return get(`/api/v1/shop/assist/price-hint${suffix}`, o);
       }
     },
     myAds: {
       list: () => get("/api/v1/shop/my/ads", o),
-      post: (body) => post("/api/v1/shop/my/ads", body, o),
-      edit: (id, body) => patch(`/api/v1/shop/my/ads/${id}`, body, o),
-      pause: (id) => post(`/api/v1/shop/my/ads/${id}/pause`, null, o),
-      activate: (id) => post(`/api/v1/shop/my/ads/${id}/activate`, null, o),
-      sold: (id, body = {}) => post(`/api/v1/shop/my/ads/${id}/sold`, body, o),
-      renew: (id) => post(`/api/v1/shop/my/ads/${id}/renew`, null, o),
-      delete: (id) => del(`/api/v1/shop/my/ads/${id}`, o),
+      post: (body) => post("/api/v1/shop/ads", body, o),
+      edit: async (id, partial) => {
+        const existing = await get(`/api/v1/shop/my/ads/${id}`, o);
+        const merged = {
+          category: existing.category,
+          subcategory: existing.subcategory ?? null,
+          title: existing.title,
+          description: existing.description ?? "",
+          priceGross: existing.priceGross,
+          negotiable: existing.negotiable,
+          condition: existing.condition,
+          county: existing.county,
+          city: existing.city,
+          images: existing.images,
+          attrs: existing.attrs,
+          contactName: existing.contactName ?? "",
+          contactPhone: existing.contactPhone ?? null,
+          contactEmail: existing.contactEmail,
+          showPhone: existing.showPhone,
+          resellable: existing.resellable,
+          partnerCommissionPct: existing.partnerCommissionPct,
+          ...partial
+        };
+        return put(`/api/v1/shop/ads/${id}`, merged, o);
+      },
+      pause: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: "szunetel" }, o),
+      activate: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: "aktiv" }, o),
+      sold: (id, body = {}) => post(`/api/v1/shop/ads/${id}/sold`, body, o),
+      renew: (id) => post(`/api/v1/shop/ads/${id}/renew`, null, o),
+      delete: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: "torolve" }, o),
       uploadImage: (filePath) => uploadShopImage(filePath, o),
       fromPhotos: (imageIds) => post("/api/v1/shop/assist/from-photos", { imageIds }, o)
     },
     inquiries: {
-      listReceived: () => get("/api/v1/shop/my/inquiries", o),
+      listReceived: async () => {
+        const result = await get("/api/v1/shop/my/inquiries", o);
+        return result.items;
+      },
       send: (adId, body) => post(`/api/v1/shop/ads/${adId}/inquiries`, body, o)
     },
     favorites: {
       list: () => get("/api/v1/shop/my/favorites", o),
-      add: (adId) => post(`/api/v1/shop/my/favorites/${adId}`, null, o),
-      remove: (adId) => del(`/api/v1/shop/my/favorites/${adId}`, o)
+      add: (adId) => put(`/api/v1/shop/ads/${adId}/favorite`, null, o),
+      remove: (adId) => del(`/api/v1/shop/ads/${adId}/favorite`, o)
     },
     reservations: {
       create: (adId, body) => post(`/api/v1/shop/ads/${adId}/reservations`, body, o),
@@ -2900,10 +2936,11 @@ function printAdTable(ads) {
     return;
   }
   for (const ad of ads) {
-    const status = ad.status === "aktiv" ? "akt\xEDv" : ad.status;
+    const rawStatus = ad.status ?? "";
+    const status = rawStatus === "aktiv" ? "akt\xEDv" : rawStatus;
     const reserved = ad.reserved ? " [foglalt]" : "";
     process.stdout.write(
-      `  #${String(ad.id).padStart(5)}  ${fmt3(ad.priceGross).padStart(12)}  ${status.padEnd(10)}${reserved}  ${ad.title}
+      `  #${String(ad.id).padStart(5)}  ${fmt3(ad.priceGross ?? 0).padStart(12)}  ${status.padEnd(10)}${reserved}  ${ad.title}
 `
     );
   }
@@ -2984,12 +3021,12 @@ function registerShopCommands(program2, shopClient2, _opts) {
         printJson3(cats);
       } else {
         for (const cat of cats) {
-          process.stdout.write(`${cat.id}  ${cat.name}
+          process.stdout.write(`${cat.key}  ${cat.label}
 `);
           for (const sub of cat.subcategories ?? []) {
-            const attrs = sub.requiredAttributes?.map((a) => a.key).join(", ") ?? "";
+            const reqAttrs = sub.attrs?.filter((a) => a.required).map((a) => a.key).join(", ") ?? "";
             process.stdout.write(
-              `  \u2514\u2500 ${sub.id.padEnd(30)} ${sub.name}${attrs ? `  [k\xF6t.: ${attrs}]` : ""}
+              `  \u2514\u2500 ${sub.key.padEnd(30)} ${sub.label}${reqAttrs ? `  [k\xF6t.: ${reqAttrs}]` : ""}
 `
             );
           }
@@ -3038,7 +3075,7 @@ function registerShopCommands(program2, shopClient2, _opts) {
       } else {
         process.stdout.write(`#${ad.id}  ${ad.title}
 `);
-        process.stdout.write(`  \xC1r:        ${fmt3(ad.priceGross)}${ad.negotiable ? " (alku)" : ""}
+        process.stdout.write(`  \xC1r:        ${fmt3(ad.priceGross ?? 0)}${ad.negotiable ? " (alku)" : ""}
 `);
         process.stdout.write(`  \xC1llapot:   ${ad.status}${ad.reserved ? " [foglalt]" : ""}
 `);
@@ -3053,9 +3090,9 @@ function registerShopCommands(program2, shopClient2, _opts) {
 ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
 `);
         }
-        if (Object.keys(ad.attributes ?? {}).length > 0) {
+        if (Object.keys(ad.attrs ?? {}).length > 0) {
           process.stdout.write("  Attrib\xFAtumok:\n");
-          for (const [k, v] of Object.entries(ad.attributes)) {
+          for (const [k, v] of Object.entries(ad.attrs)) {
             process.stdout.write(`    ${k}: ${v}
 `);
           }
@@ -3068,67 +3105,74 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("price-hint").description("\xC1rjavaslat kateg\xF3ria alapj\xE1n").option("--category <id>", "Kateg\xF3ria").option("--subcategory <id>", "Alkateg\xF3ria").action(async (opts, cmd) => {
     try {
       const hint = await shopClient2.ads.priceHint({
-        categoryId: opts.category,
-        subcategoryId: opts.subcategory
+        category: opts.category,
+        subcategory: opts.subcategory
       });
       if (getJsonFlag2(cmd)) {
         printJson3(hint);
       } else {
-        process.stdout.write("\xC1rjavaslat:\n");
-        if (hint.suggestedMin != null) {
-          process.stdout.write(`  Min: ${fmt3(hint.suggestedMin)}
+        if (!hint) {
+          process.stdout.write("Nincs elegend\u0151 adat az \xE1rjavaslathoz.\n");
+        } else {
+          process.stdout.write("\xC1rjavaslat:\n");
+          process.stdout.write(`  25. percentilis: ${fmt3(hint.p25)}
+`);
+          process.stdout.write(`  75. percentilis: ${fmt3(hint.p75)}
+`);
+          process.stdout.write(`  Mintaalap: ${hint.count} hirdet\xE9s
 `);
         }
-        if (hint.suggestedMid != null) {
-          process.stdout.write(`  K\xF6z\xE9p: ${fmt3(hint.suggestedMid)}
-`);
-        }
-        if (hint.suggestedMax != null) {
-          process.stdout.write(`  Max: ${fmt3(hint.suggestedMax)}
-`);
-        }
-        process.stdout.write(`  Mintaalap: ${hint.recentCount} hirdet\xE9s
-`);
       }
     } catch (err) {
       handleError2(err);
     }
   });
-  shop.command("post").description("\xDAj hirdet\xE9s felad\xE1sa").option("--title <c\xEDm>", "Hirdet\xE9s c\xEDme").option("--category <id>", "Kateg\xF3ria").option("--subcategory <id>", "Alkateg\xF3ria").option("--price <Ft>", "V\xE9tel\xE1r (brutt\xF3 Ft)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "Term\xE9k \xE1llapota").option("--description <le\xEDr\xE1s>", "Hirdet\xE9s le\xEDr\xE1sa").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--image <f\xE1jl>", "K\xE9pf\xE1jl felt\xF6lt\xE9se (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--from-photos", "AI-javaslatot k\xE9r a felt\xF6lt\xF6tt k\xE9pek alapj\xE1n").option("--dry-run", "Csak megjelen\xEDti a k\xE9r\xE9st, nem k\xFCldi el").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
+  shop.command("post").description("\xDAj hirdet\xE9s felad\xE1sa").option("--title <c\xEDm>", "Hirdet\xE9s c\xEDme").option("--category <kulcs>", "Kateg\xF3ria kulcsa (pl. elekt)").option("--subcategory <kulcs>", "Alkateg\xF3ria kulcsa").option("--price <Ft>", "V\xE9tel\xE1r (brutt\xF3 Ft, \xFCresen = \xE1r n\xE9lk\xFCl)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "\xC1llapot: uj | ujszeru | hasznalt | serult").option("--description <le\xEDr\xE1s>", "Hirdet\xE9s le\xEDr\xE1sa").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--contact-email <email>", "Kapcsolattart\xF3 e-mail-c\xEDm (k\xF6telez\u0151)").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--resellable", "Viszontelad\xF3i jogok enged\xE9lyez\xE9se").option("--commission-pct <sz\xE1m>", "Viszontelad\xF3i jutal\xE9k (%)", "0").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--image <f\xE1jl>", "K\xE9pf\xE1jl felt\xF6lt\xE9se (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--from-photos", "AI-javaslatot k\xE9r a felt\xF6lt\xF6tt k\xE9pek alapj\xE1n").option("--dry-run", "Csak megjelen\xEDti a k\xE9r\xE9st, nem k\xFCldi el").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
     async (opts, cmd) => {
       try {
-        let imageIds = [];
+        const imageUrls = [];
+        const imageNumericIds = [];
         if (opts.image.length > 0) {
           process.stderr.write(`${opts.image.length} k\xE9p felt\xF6lt\xE9se...
 `);
           for (const filePath of opts.image) {
             const result = await shopClient2.myAds.uploadImage(filePath);
-            imageIds.push(result.imageId);
+            imageUrls.push(result.url);
+            imageNumericIds.push(result.id);
           }
         }
         let aiSuggest = {};
-        if (opts.fromPhotos && imageIds.length > 0) {
+        if (opts.fromPhotos && imageNumericIds.length > 0) {
           process.stderr.write("AI-javaslat k\xE9r\xE9se a k\xE9pekb\u0151l...\n");
-          aiSuggest = await shopClient2.myAds.fromPhotos(imageIds);
+          aiSuggest = await shopClient2.myAds.fromPhotos(imageNumericIds);
           process.stdout.write("AI-javaslat:\n");
           printJson3(aiSuggest);
         }
         const attrs = parseAttrs(opts.attr);
+        const title = opts.title ?? aiSuggest.title ?? "";
+        const category = opts.category ?? aiSuggest.categoryId ?? "";
+        const condition = opts.condition ?? aiSuggest.condition ?? "";
+        const county = opts.county ?? "";
+        const city = opts.city ?? "";
+        const contactEmail = opts.contactEmail ?? "";
         const body = {
-          title: opts.title ?? aiSuggest.title ?? "",
-          categoryId: opts.category ?? aiSuggest.categoryId,
-          subcategoryId: opts.subcategory ?? aiSuggest.subcategoryId,
-          priceGross: opts.price != null ? parseInt(opts.price, 10) : aiSuggest.suggestedPriceGross ?? 0,
+          title,
+          category,
+          subcategory: opts.subcategory ?? aiSuggest.subcategoryId ?? null,
+          priceGross: opts.price != null ? parseInt(opts.price, 10) : aiSuggest.suggestedPriceGross ?? null,
           negotiable: opts.negotiable ?? false,
-          condition: opts.condition ?? aiSuggest.condition,
-          description: opts.description ?? aiSuggest.description,
-          county: opts.county,
-          city: opts.city,
-          attributes: { ...aiSuggest.attributes, ...attrs },
-          imageIds,
-          contactName: opts.contactName,
-          contactPhone: opts.contactPhone,
-          showPhone: opts.showPhone ?? false
+          condition,
+          description: opts.description ?? aiSuggest.description ?? "",
+          county,
+          city,
+          attrs: { ...aiSuggest.attrs, ...attrs },
+          images: imageUrls,
+          contactName: opts.contactName ?? "",
+          contactPhone: opts.contactPhone ?? null,
+          contactEmail,
+          showPhone: opts.showPhone ?? false,
+          resellable: opts.resellable ?? false,
+          partnerCommissionPct: opts.commissionPct ? parseFloat(opts.commissionPct) : 0
         };
         if (!body.title) {
           process.stderr.write("A --title megad\xE1sa k\xF6telez\u0151 (vagy --from-photos az AI-javaslathoz).\n");
@@ -3138,6 +3182,19 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
         if (opts.dryRun) {
           process.stdout.write("K\xE9r\xE9s (dry-run, NEM LETT ELK\xDCLDVE):\n");
           printJson3(body);
+          return;
+        }
+        const missing = [];
+        if (!body.category) missing.push("--category");
+        if (!body.condition) missing.push("--condition");
+        if (!body.county) missing.push("--county");
+        if (!body.city) missing.push("--city");
+        if (!body.contactName) missing.push("--contact-name");
+        if (!body.contactEmail) missing.push("--contact-email");
+        if (missing.length > 0) {
+          process.stderr.write(`Hi\xE1nyz\xF3 k\xF6telez\u0151 mez\u0151${missing.length > 1 ? "k" : ""}: ${missing.join(", ")}
+`);
+          process.exit(2);
           return;
         }
         if (!opts.yes) {
@@ -3174,7 +3231,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
       handleError2(err);
     }
   });
-  shop.command("edit <id>").description("Hirdet\xE9s szerkeszt\xE9se").option("--title <c\xEDm>", "\xDAj c\xEDm").option("--price <Ft>", "\xDAj \xE1r (brutt\xF3 Ft)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "Term\xE9k \xE1llapota").option("--description <le\xEDr\xE1s>", "Le\xEDr\xE1s").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum", (v, a) => [...a, v], []).option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").action(
+  shop.command("edit <id>").description("Hirdet\xE9s szerkeszt\xE9se").option("--title <c\xEDm>", "\xDAj c\xEDm").option("--price <Ft>", "\xDAj \xE1r (brutt\xF3 Ft)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "\xC1llapot: uj | ujszeru | hasznalt | serult").option("--description <le\xEDr\xE1s>", "Le\xEDr\xE1s").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum", (v, a) => [...a, v], []).option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--contact-email <email>", "Kapcsolattart\xF3 e-mail-c\xEDm").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--resellable", "Viszontelad\xF3i jogok enged\xE9lyez\xE9se").option("--commission-pct <sz\xE1m>", "Viszontelad\xF3i jutal\xE9k (%)").action(
     async (idStr, opts, cmd) => {
       const id = parseInt(idStr, 10);
       if (isNaN(id)) {
@@ -3192,10 +3249,13 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
         if (opts.description) body.description = opts.description;
         if (opts.county) body.county = opts.county;
         if (opts.city) body.city = opts.city;
-        if (Object.keys(attrs).length > 0) body.attributes = attrs;
+        if (Object.keys(attrs).length > 0) body.attrs = attrs;
         if (opts.contactName) body.contactName = opts.contactName;
         if (opts.contactPhone) body.contactPhone = opts.contactPhone;
+        if (opts.contactEmail) body.contactEmail = opts.contactEmail;
         if (opts.showPhone !== void 0) body.showPhone = opts.showPhone;
+        if (opts.resellable !== void 0) body.resellable = opts.resellable;
+        if (opts.commissionPct) body.partnerCommissionPct = parseFloat(opts.commissionPct);
         const ad = await shopClient2.myAds.edit(id, body);
         if (getJsonFlag2(cmd)) {
           printJson3(ad);
@@ -3301,7 +3361,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
         }
         for (const item of items) {
           const read = item.readAt ? "" : " [\xFAj]";
-          process.stdout.write(`  #${item.id}${read}  Hirdet\xE9s #${item.adId}  ${item.senderName}
+          process.stdout.write(`  #${item.id}${read}  Hirdet\xE9s #${item.adId}  ${item.name}
 `);
           process.stdout.write(`    ${item.message.slice(0, 80)}
 `);
@@ -3311,10 +3371,20 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
       handleError2(err);
     }
   });
-  shop.command("inquire <adId>").description("\xDCzenet k\xFCld\xE9se elad\xF3nak").option("--message <sz\xF6veg>", "\xDCzenet sz\xF6vege").action(async (adIdStr, opts, cmd) => {
+  shop.command("inquire <adId>").description("\xDCzenet k\xFCld\xE9se elad\xF3nak").option("--name <n\xE9v>", "A felad\xF3 neve (k\xF6telez\u0151)").option("--email <email>", "A felad\xF3 e-mail-c\xEDm (k\xF6telez\u0151)").option("--phone <telefon>", "A felad\xF3 telefonsz\xE1ma (opcion\xE1lis)").option("--message <sz\xF6veg>", "\xDCzenet sz\xF6vege (k\xF6telez\u0151)").action(async (adIdStr, opts, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId)) {
       process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.name) {
+      process.stderr.write("--name megad\xE1sa k\xF6telez\u0151.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.email) {
+      process.stderr.write("--email megad\xE1sa k\xF6telez\u0151.\n");
       process.exit(2);
       return;
     }
@@ -3324,7 +3394,13 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
       return;
     }
     try {
-      const result = await shopClient2.inquiries.send(adId, { message: opts.message });
+      const body = {
+        name: opts.name,
+        email: opts.email,
+        message: opts.message
+      };
+      if (opts.phone) body.phone = opts.phone;
+      const result = await shopClient2.inquiries.send(adId, body);
       if (getJsonFlag2(cmd)) printJson3(result);
       else process.stdout.write("\xDCzenet elk\xFCldve.\n");
     } catch (err) {

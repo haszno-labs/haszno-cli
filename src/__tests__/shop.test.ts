@@ -91,27 +91,29 @@ function mockExit() {
 // ── shop categories ───────────────────────────────────────────────────────────
 
 describe('haszno shop categories', () => {
-  it('calls GET /api/v1/shop/categories', async () => {
-    const { fn, calls } = makeFetch(200, [{ id: 'elekt', name: 'Elektronika', subcategories: [] }])
+  it('calls GET /api/v1/shop/taxonomy and displays categories', async () => {
+    const taxonomy = { categories: [{ key: 'elekt', label: 'Elektronika', emoji: '📱', subcategories: [], attrs: [] }], counties: [] }
+    const { fn, calls } = makeFetch(200, taxonomy)
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'categories'], { from: 'user' })
       expect(calls).toHaveLength(1)
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/categories`)
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/taxonomy`)
       expect(calls[0].init.method).toBe('GET')
       expect(cap.text()).toContain('Elektronika')
     } finally { cap.restore() }
   })
 
   it('outputs JSON with --json', async () => {
-    const data = [{ id: 'elekt', name: 'Elektronika', subcategories: [] }]
-    const { fn } = makeFetch(200, data)
+    const cats = [{ key: 'elekt', label: 'Elektronika', emoji: '📱', subcategories: [], attrs: [] }]
+    const taxonomy = { categories: cats, counties: [] }
+    const { fn } = makeFetch(200, taxonomy)
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['--json', 'shop', 'categories'], { from: 'user' })
-      expect(JSON.parse(cap.text())).toEqual(data)
+      expect(JSON.parse(cap.text())).toEqual(cats)
     } finally { cap.restore() }
   })
 })
@@ -130,8 +132,8 @@ describe('haszno shop search', () => {
       )
       expect(calls[0].url).toContain('/api/v1/shop/ads')
       expect(calls[0].url).toContain('q=ker%C3%A9kp%C3%A1r')
-      expect(calls[0].url).toContain('category=sport')
-      expect(calls[0].url).toContain('minPrice=5000')
+      expect(calls[0].url).toContain('cat=sport')
+      expect(calls[0].url).toContain('min=5000')
       expect(calls[0].url).toContain('page=2')
       expect(calls[0].init.method).toBe('GET')
     } finally { cap.restore() }
@@ -152,7 +154,7 @@ describe('haszno shop search', () => {
 
 describe('haszno shop show', () => {
   it('calls GET /api/v1/shop/ads/:id', async () => {
-    const ad = { id: 42, title: 'Bicikli', priceGross: 25000, negotiable: true, status: 'aktiv', reserved: false, description: null, condition: 'jó', county: 'Pest', city: 'Budapest', images: [], attributes: {} }
+    const ad = { id: 42, title: 'Bicikli', priceGross: 25000, negotiable: true, status: 'aktiv', reserved: false, description: null, condition: 'jó', county: 'Pest', city: 'Budapest', images: [], attrs: {} }
     const { fn, calls } = makeFetch(200, ad)
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
@@ -182,15 +184,15 @@ describe('haszno shop show', () => {
 // ── shop price-hint ───────────────────────────────────────────────────────────
 
 describe('haszno shop price-hint', () => {
-  it('calls GET /api/v1/shop/price-hint', async () => {
-    const hint = { categoryId: 'sport', subcategoryId: null, suggestedMin: 5000, suggestedMax: 20000, suggestedMid: 10000, recentCount: 15 }
+  it('calls GET /api/v1/shop/assist/price-hint with cat= param', async () => {
+    const hint = { p25: 5000, p75: 20000, count: 15 }
     const { fn, calls } = makeFetch(200, hint)
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'price-hint', '--category', 'sport'], { from: 'user' })
-      expect(calls[0].url).toContain('/api/v1/shop/price-hint')
-      expect(calls[0].url).toContain('categoryId=sport')
+      expect(calls[0].url).toContain('/api/v1/shop/assist/price-hint')
+      expect(calls[0].url).toContain('cat=sport')
       expect(cap.text()).toContain('5')
     } finally { cap.restore() }
   })
@@ -200,7 +202,7 @@ describe('haszno shop price-hint', () => {
 
 describe('haszno shop post --dry-run', () => {
   it('prints request body without sending any HTTP call', async () => {
-    const { fn, calls } = makeFetch(201, { id: 1, title: 'Test', priceGross: 1000, status: 'aktiv', reserved: false, images: [], attributes: {}, negotiable: false, condition: null, county: null, city: null, description: null, contactName: null, contactPhone: null, showPhone: false, createdAt: '', updatedAt: '' })
+    const { fn, calls } = makeFetch(201, { id: 1, title: 'Test', priceGross: 1000, status: 'aktiv', reserved: false, images: [], attrs: {}, negotiable: false, condition: 'uj', county: 'Pest', city: 'Budapest', description: '', contactName: '', contactPhone: null, showPhone: false, createdAt: '', updatedAt: '', category: 'egyeb', subcategory: null, contactEmail: 'x@x.com', resellable: false, partnerCommissionPct: 0 })
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
@@ -219,18 +221,23 @@ describe('haszno shop post --dry-run', () => {
 // ── shop post ─────────────────────────────────────────────────────────────────
 
 describe('haszno shop post', () => {
-  it('calls POST /api/v1/shop/my/ads with correct body', async () => {
-    const ad = { id: 7, title: 'Futópad', priceGross: 50000, status: 'aktiv', reserved: false, images: [], attributes: {}, negotiable: false, condition: null, county: null, city: null, description: null, contactName: null, contactPhone: null, showPhone: false, createdAt: '', updatedAt: '' }
+  it('calls POST /api/v1/shop/ads with correct body', async () => {
+    const ad = { id: 7, title: 'Futópad', priceGross: 50000, status: 'aktiv', reserved: false, images: [], attrs: {}, negotiable: false, condition: 'hasznalt', county: 'Pest', city: 'Budapest', description: '', contactName: '', contactPhone: null, showPhone: false, createdAt: '', updatedAt: '', category: 'sport', subcategory: null, contactEmail: 'test@test.com', resellable: false, partnerCommissionPct: 0 }
     const { fn, calls } = makeFetch(201, ad)
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(
-        ['shop', 'post', '--title', 'Futópad', '--price', '50000', '--yes'],
+        ['shop', 'post', '--title', 'Futópad', '--price', '50000',
+          '--category', 'sport', '--condition', 'hasznalt',
+          '--county', 'Pest', '--city', 'Budapest',
+          '--contact-name', 'Test Eladó',
+          '--contact-email', 'test@test.com', '--yes'],
         { from: 'user' },
       )
-      const postCall = calls.find((c) => c.init.method === 'POST' && c.url.includes('/api/v1/shop/my/ads'))
+      const postCall = calls.find((c) => c.init.method === 'POST' && c.url.includes('/api/v1/shop/ads'))
       expect(postCall).toBeDefined()
+      expect(postCall!.url).toBe(`${BASE}/api/v1/shop/ads`)
       const body = JSON.parse(postCall!.init.body as string)
       expect(body.title).toBe('Futópad')
       expect(body.priceGross).toBe(50000)
@@ -270,16 +277,28 @@ describe('haszno shop my', () => {
 // ── shop edit ─────────────────────────────────────────────────────────────────
 
 describe('haszno shop edit', () => {
-  it('calls PATCH /api/v1/shop/my/ads/:id with partial body', async () => {
-    const ad = { id: 42, title: 'Új cím', priceGross: 30000, status: 'aktiv', reserved: false, images: [], attributes: {}, negotiable: false, condition: null, county: null, city: null, description: null, contactName: null, contactPhone: null, showPhone: false, createdAt: '', updatedAt: '' }
+  it('fetches current ad (GET) then PUTs merged body to /api/v1/shop/ads/:id', async () => {
+    // The mock returns the same response for both GET and PUT
+    const ad = {
+      id: 42, title: 'Régi cím', priceGross: 20000, status: 'aktiv', reserved: false,
+      images: [], attrs: {}, negotiable: false, condition: 'hasznalt',
+      county: 'Pest', city: 'Budapest', description: 'Leírás', contactName: 'Test',
+      contactPhone: null, showPhone: false, createdAt: '', updatedAt: '',
+      category: 'sport', subcategory: null, contactEmail: 'eladó@test.com',
+      resellable: false, partnerCommissionPct: 0,
+    }
     const { fn, calls } = makeFetch(200, ad)
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'edit', '42', '--title', 'Új cím', '--price', '30000'], { from: 'user' })
+      // Call 0: GET to fetch existing ad
       expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/ads/42`)
-      expect(calls[0].init.method).toBe('PATCH')
-      const body = JSON.parse(calls[0].init.body as string)
+      expect(calls[0].init.method).toBe('GET')
+      // Call 1: PUT with merged body
+      expect(calls[1].url).toBe(`${BASE}/api/v1/shop/ads/42`)
+      expect(calls[1].init.method).toBe('PUT')
+      const body = JSON.parse(calls[1].init.body as string)
       expect(body.title).toBe('Új cím')
       expect(body.priceGross).toBe(30000)
     } finally { cap.restore() }
@@ -288,59 +307,70 @@ describe('haszno shop edit', () => {
 
 // ── shop pause / activate / renew / delete ────────────────────────────────────
 
+const mockAd = (status: string) => ({
+  id: 5, status, reserved: false, title: 'Test', priceGross: 0, images: [], attrs: {},
+  negotiable: false, condition: 'hasznalt', county: 'Pest', city: 'Budapest',
+  description: '', contactName: '', contactPhone: null, showPhone: false,
+  createdAt: '', updatedAt: '', category: 'egyeb', subcategory: null,
+  contactEmail: 'x@x.com', resellable: false, partnerCommissionPct: 0,
+})
+
 describe('haszno shop state commands', () => {
-  it('pause calls POST /api/v1/shop/my/ads/:id/pause', async () => {
-    const { fn, calls } = makeFetch(200, { id: 5, status: 'szunetel', reserved: false, title: 'Test', priceGross: 0, images: [], attributes: {}, negotiable: false, condition: null, county: null, city: null, description: null, contactName: null, contactPhone: null, showPhone: false, createdAt: '', updatedAt: '' })
+  it('pause calls POST /api/v1/shop/ads/:id/status with {status:"szunetel"}', async () => {
+    const { fn, calls } = makeFetch(200, mockAd('szunetel'))
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'pause', '5'], { from: 'user' })
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/ads/5/pause`)
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/5/status`)
       expect(calls[0].init.method).toBe('POST')
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ status: 'szunetel' })
     } finally { cap.restore() }
   })
 
-  it('activate calls POST /api/v1/shop/my/ads/:id/activate', async () => {
-    const { fn, calls } = makeFetch(200, { id: 5, status: 'aktiv', reserved: false, title: 'Test', priceGross: 0, images: [], attributes: {}, negotiable: false, condition: null, county: null, city: null, description: null, contactName: null, contactPhone: null, showPhone: false, createdAt: '', updatedAt: '' })
+  it('activate calls POST /api/v1/shop/ads/:id/status with {status:"aktiv"}', async () => {
+    const { fn, calls } = makeFetch(200, mockAd('aktiv'))
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'activate', '5'], { from: 'user' })
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/ads/5/activate`)
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/5/status`)
       expect(calls[0].init.method).toBe('POST')
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ status: 'aktiv' })
     } finally { cap.restore() }
   })
 
-  it('sold calls POST /api/v1/shop/my/ads/:id/sold with price', async () => {
-    const { fn, calls } = makeFetch(200, { id: 5, status: 'eladva', reserved: false, title: 'Test', priceGross: 0, images: [], attributes: {}, negotiable: false, condition: null, county: null, city: null, description: null, contactName: null, contactPhone: null, showPhone: false, createdAt: '', updatedAt: '' })
+  it('sold calls POST /api/v1/shop/ads/:id/sold with price', async () => {
+    const { fn, calls } = makeFetch(200, mockAd('eladva'))
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'sold', '5', '--price', '23000'], { from: 'user' })
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/ads/5/sold`)
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/5/sold`)
       const body = JSON.parse(calls[0].init.body as string)
       expect(body.soldPriceGross).toBe(23000)
     } finally { cap.restore() }
   })
 
-  it('renew calls POST /api/v1/shop/my/ads/:id/renew', async () => {
-    const { fn, calls } = makeFetch(200, { id: 5, status: 'aktiv', reserved: false, title: 'Test', priceGross: 0, images: [], attributes: {}, negotiable: false, condition: null, county: null, city: null, description: null, contactName: null, contactPhone: null, showPhone: false, createdAt: '', updatedAt: '' })
+  it('renew calls POST /api/v1/shop/ads/:id/renew', async () => {
+    const { fn, calls } = makeFetch(200, mockAd('aktiv'))
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'renew', '5'], { from: 'user' })
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/ads/5/renew`)
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/5/renew`)
     } finally { cap.restore() }
   })
 
-  it('delete calls DELETE /api/v1/shop/my/ads/:id', async () => {
-    const { fn, calls } = makeFetch(200, { deleted: true })
+  it('delete calls POST /api/v1/shop/ads/:id/status with {status:"torolve"}', async () => {
+    const { fn, calls } = makeFetch(200, mockAd('torolve'))
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'delete', '5'], { from: 'user' })
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/ads/5`)
-      expect(calls[0].init.method).toBe('DELETE')
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/5/status`)
+      expect(calls[0].init.method).toBe('POST')
+      expect(JSON.parse(calls[0].init.body as string)).toEqual({ status: 'torolve' })
     } finally { cap.restore() }
   })
 })
@@ -358,15 +388,20 @@ describe('haszno shop inquiries', () => {
     } finally { cap.restore() }
   })
 
-  it('inquire calls POST /api/v1/shop/ads/:adId/inquiries', async () => {
-    const { fn, calls } = makeFetch(201, { id: 1, adId: 42, message: 'Hello', senderName: 'Test', senderEmail: null, createdAt: '', readAt: null })
+  it('inquire calls POST /api/v1/shop/ads/:adId/inquiries with name, email, message', async () => {
+    const { fn, calls } = makeFetch(201, { ok: true })
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
-      await buildShopProgram(sc).parseAsync(['shop', 'inquire', '42', '--message', 'Hello'], { from: 'user' })
+      await buildShopProgram(sc).parseAsync(
+        ['shop', 'inquire', '42', '--name', 'Kovács János', '--email', 'kovacs@test.com', '--message', 'Hello'],
+        { from: 'user' },
+      )
       expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/42/inquiries`)
       expect(calls[0].init.method).toBe('POST')
       const body = JSON.parse(calls[0].init.body as string)
+      expect(body.name).toBe('Kovács János')
+      expect(body.email).toBe('kovacs@test.com')
       expect(body.message).toBe('Hello')
     } finally { cap.restore() }
   })
@@ -378,7 +413,7 @@ describe('haszno shop inquiries', () => {
     const exitSpy = mockExit()
     try {
       await expect(
-        buildShopProgram(sc).parseAsync(['shop', 'inquire', '42'], { from: 'user' }),
+        buildShopProgram(sc).parseAsync(['shop', 'inquire', '42', '--name', 'Test', '--email', 't@t.com'], { from: 'user' }),
       ).rejects.toThrow('process.exit called')
       expect(exitSpy).toHaveBeenCalledWith(2)
     } finally { cap.restore(); exitSpy.mockRestore() }
@@ -398,24 +433,24 @@ describe('haszno shop favorites', () => {
     } finally { cap.restore() }
   })
 
-  it('favorite calls POST /api/v1/shop/my/favorites/:adId', async () => {
+  it('favorite calls PUT /api/v1/shop/ads/:adId/favorite', async () => {
     const { fn, calls } = makeFetch(200, { ok: true })
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'favorite', '10'], { from: 'user' })
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/favorites/10`)
-      expect(calls[0].init.method).toBe('POST')
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/10/favorite`)
+      expect(calls[0].init.method).toBe('PUT')
     } finally { cap.restore() }
   })
 
-  it('unfavorite calls DELETE /api/v1/shop/my/favorites/:adId', async () => {
+  it('unfavorite calls DELETE /api/v1/shop/ads/:adId/favorite', async () => {
     const { fn, calls } = makeFetch(200, { ok: true })
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {
       await buildShopProgram(sc).parseAsync(['shop', 'unfavorite', '10'], { from: 'user' })
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/favorites/10`)
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/ads/10/favorite`)
       expect(calls[0].init.method).toBe('DELETE')
     } finally { cap.restore() }
   })
@@ -540,8 +575,8 @@ describe('haszno shop reservation sub-commands', () => {
 // ── Multipart image upload ────────────────────────────────────────────────────
 
 describe('uploadShopImage', () => {
-  it('sends multipart POST to /api/v1/shop/my/images', async () => {
-    // Create a temporary file
+  it('sends raw binary POST to /api/v1/shop/images', async () => {
+    // Create a temporary JPEG file
     const tmp = mkdtempSync(join(tmpdir(), 'haszno-img-test-'))
     const imgPath = join(tmp, 'test.jpg')
     try {
@@ -550,7 +585,7 @@ describe('uploadShopImage', () => {
       const calls: FetchCall[] = []
       const fn = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
         calls.push({ url: String(url), init: init ?? {} })
-        return new Response(JSON.stringify({ imageId: 'img_abc', url: 'https://cdn.example/img_abc.jpg' }), { status: 200 })
+        return new Response(JSON.stringify({ id: 1, url: '/api/shop/images/1' }), { status: 200 })
       }) as unknown as typeof fetch
 
       const result = await uploadShopImage(imgPath, {
@@ -561,14 +596,16 @@ describe('uploadShopImage', () => {
       })
 
       expect(calls).toHaveLength(1)
-      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/my/images`)
+      expect(calls[0].url).toBe(`${BASE}/api/v1/shop/images`)
       expect(calls[0].init.method).toBe('POST')
-      // Should be FormData (body is a FormData instance)
-      expect(calls[0].init.body).toBeInstanceOf(FormData)
+      // Body must NOT be FormData — it's the raw Buffer
+      expect(calls[0].init.body).not.toBeInstanceOf(FormData)
       // Auth header should be Bearer
       const headers = calls[0].init.headers as Record<string, string>
       expect(headers['Authorization']).toBe(`Bearer ${TOKEN}`)
-      expect(result.imageId).toBe('img_abc')
+      expect(headers['Content-Type']).toBe('image/jpeg')
+      expect(result.id).toBe(1)
+      expect(result.url).toBe('/api/shop/images/1')
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }

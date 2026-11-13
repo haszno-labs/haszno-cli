@@ -35,7 +35,7 @@ import type { Command } from 'commander'
 import type { HttpOptions } from '../client/http.js'
 import type {
   ShopHasznoClient,
-  ShopAd,
+  ShopMyAd,
   ShopReservation,
   ShopReservationSimple,
 } from '../client/shop.js'
@@ -56,16 +56,17 @@ function fmt(n: number): string {
   return n.toLocaleString('hu-HU') + ' Ft'
 }
 
-function printAdTable(ads: ShopAd[]): void {
+function printAdTable(ads: Array<{ id: number; priceGross: number | null; status?: string; reserved: boolean; title: string }>): void {
   if (ads.length === 0) {
     process.stdout.write('Nincs találat.\n')
     return
   }
   for (const ad of ads) {
-    const status = ad.status === 'aktiv' ? 'aktív' : ad.status
+    const rawStatus = ad.status ?? ''
+    const status = rawStatus === 'aktiv' ? 'aktív' : rawStatus
     const reserved = ad.reserved ? ' [foglalt]' : ''
     process.stdout.write(
-      `  #${String(ad.id).padStart(5)}  ${fmt(ad.priceGross).padStart(12)}  ${status.padEnd(10)}${reserved}  ${ad.title}\n`,
+      `  #${String(ad.id).padStart(5)}  ${fmt(ad.priceGross ?? 0).padStart(12)}  ${status.padEnd(10)}${reserved}  ${ad.title}\n`,
     )
   }
 }
@@ -164,11 +165,11 @@ export function registerShopCommands(
           printJson(cats)
         } else {
           for (const cat of cats) {
-            process.stdout.write(`${cat.id}  ${cat.name}\n`)
+            process.stdout.write(`${cat.key}  ${cat.label}\n`)
             for (const sub of cat.subcategories ?? []) {
-              const attrs = sub.requiredAttributes?.map((a) => a.key).join(', ') ?? ''
+              const reqAttrs = sub.attrs?.filter((a) => a.required).map((a) => a.key).join(', ') ?? ''
               process.stdout.write(
-                `  └─ ${sub.id.padEnd(30)} ${sub.name}${attrs ? `  [köt.: ${attrs}]` : ''}\n`,
+                `  └─ ${sub.key.padEnd(30)} ${sub.label}${reqAttrs ? `  [köt.: ${reqAttrs}]` : ''}\n`,
               )
             }
           }
@@ -246,7 +247,7 @@ export function registerShopCommands(
           printJson(ad)
         } else {
           process.stdout.write(`#${ad.id}  ${ad.title}\n`)
-          process.stdout.write(`  Ár:        ${fmt(ad.priceGross)}${ad.negotiable ? ' (alku)' : ''}\n`)
+          process.stdout.write(`  Ár:        ${fmt(ad.priceGross ?? 0)}${ad.negotiable ? ' (alku)' : ''}\n`)
           process.stdout.write(`  Állapot:   ${ad.status}${ad.reserved ? ' [foglalt]' : ''}\n`)
           if (ad.condition) process.stdout.write(`  Állapot:   ${ad.condition}\n`)
           if (ad.county || ad.city) {
@@ -255,9 +256,9 @@ export function registerShopCommands(
           if (ad.description) {
             process.stdout.write(`  Leírás:\n${ad.description.split('\n').map((l) => `    ${l}`).join('\n')}\n`)
           }
-          if (Object.keys(ad.attributes ?? {}).length > 0) {
+          if (Object.keys(ad.attrs ?? {}).length > 0) {
             process.stdout.write('  Attribútumok:\n')
-            for (const [k, v] of Object.entries(ad.attributes)) {
+            for (const [k, v] of Object.entries(ad.attrs)) {
               process.stdout.write(`    ${k}: ${v}\n`)
             }
           }
@@ -276,23 +277,20 @@ export function registerShopCommands(
     .action(async (opts: { category?: string; subcategory?: string }, cmd: Command) => {
       try {
         const hint = await shopClient.ads.priceHint({
-          categoryId: opts.category,
-          subcategoryId: opts.subcategory,
+          category: opts.category,
+          subcategory: opts.subcategory,
         })
         if (getJsonFlag(cmd)) {
           printJson(hint)
         } else {
-          process.stdout.write('Árjavaslat:\n')
-          if (hint.suggestedMin != null) {
-            process.stdout.write(`  Min: ${fmt(hint.suggestedMin)}\n`)
+          if (!hint) {
+            process.stdout.write('Nincs elegendő adat az árjavaslathoz.\n')
+          } else {
+            process.stdout.write('Árjavaslat:\n')
+            process.stdout.write(`  25. percentilis: ${fmt(hint.p25)}\n`)
+            process.stdout.write(`  75. percentilis: ${fmt(hint.p75)}\n`)
+            process.stdout.write(`  Mintaalap: ${hint.count} hirdetés\n`)
           }
-          if (hint.suggestedMid != null) {
-            process.stdout.write(`  Közép: ${fmt(hint.suggestedMid)}\n`)
-          }
-          if (hint.suggestedMax != null) {
-            process.stdout.write(`  Max: ${fmt(hint.suggestedMax)}\n`)
-          }
-          process.stdout.write(`  Mintaalap: ${hint.recentCount} hirdetés\n`)
         }
       } catch (err) {
         handleError(err)
@@ -304,19 +302,22 @@ export function registerShopCommands(
     .command('post')
     .description('Új hirdetés feladása')
     .option('--title <cím>', 'Hirdetés címe')
-    .option('--category <id>', 'Kategória')
-    .option('--subcategory <id>', 'Alkategória')
-    .option('--price <Ft>', 'Vételár (bruttó Ft)')
+    .option('--category <kulcs>', 'Kategória kulcsa (pl. elekt)')
+    .option('--subcategory <kulcs>', 'Alkategória kulcsa')
+    .option('--price <Ft>', 'Vételár (bruttó Ft, üresen = ár nélkül)')
     .option('--negotiable', 'Alkuképes')
-    .option('--condition <állapot>', 'Termék állapota')
+    .option('--condition <állapot>', 'Állapot: uj | ujszeru | hasznalt | serult')
     .option('--description <leírás>', 'Hirdetés leírása')
     .option('--county <megye>', 'Megye')
     .option('--city <város>', 'Város')
-    .option('--attr <kulcs=érték>', 'Attribútum (megismételhető)', (v: string, a: string[]) => [...a, v], [] as string[])
-    .option('--image <fájl>', 'Képfájl feltöltése (megismételhető)', (v: string, a: string[]) => [...a, v], [] as string[])
     .option('--contact-name <név>', 'Kapcsolattartó neve')
     .option('--contact-phone <telefon>', 'Kapcsolattartó telefonszáma')
+    .option('--contact-email <email>', 'Kapcsolattartó e-mail-cím (kötelező)')
     .option('--show-phone', 'Telefonszám megjelenítése')
+    .option('--resellable', 'Viszonteladói jogok engedélyezése')
+    .option('--commission-pct <szám>', 'Viszonteladói jutalék (%)', '0')
+    .option('--attr <kulcs=érték>', 'Attribútum (megismételhető)', (v: string, a: string[]) => [...a, v], [] as string[])
+    .option('--image <fájl>', 'Képfájl feltöltése (megismételhető)', (v: string, a: string[]) => [...a, v], [] as string[])
     .option('--from-photos', 'AI-javaslatot kér a feltöltött képek alapján')
     .option('--dry-run', 'Csak megjeleníti a kérést, nem küldi el')
     .option('--yes', 'Megerősítés kihagyása')
@@ -332,11 +333,14 @@ export function registerShopCommands(
           description?: string
           county?: string
           city?: string
-          attr: string[]
-          image: string[]
           contactName?: string
           contactPhone?: string
+          contactEmail?: string
           showPhone?: boolean
+          resellable?: boolean
+          commissionPct?: string
+          attr: string[]
+          image: string[]
           fromPhotos?: boolean
           dryRun?: boolean
           yes?: boolean
@@ -344,48 +348,58 @@ export function registerShopCommands(
         cmd: Command,
       ) => {
         try {
-          // Upload images first
-          let imageIds: string[] = []
+          // Upload images first; track both url strings (for ad body) and
+          // numeric ids (for fromPhotos)
+          const imageUrls: string[] = []
+          const imageNumericIds: number[] = []
           if (opts.image.length > 0) {
             process.stderr.write(`${opts.image.length} kép feltöltése...\n`)
             for (const filePath of opts.image) {
               const result = await shopClient.myAds.uploadImage(filePath)
-              imageIds.push(result.imageId)
+              imageUrls.push(result.url)
+              imageNumericIds.push(result.id)
             }
           }
 
           // AI suggest from photos if requested
           let aiSuggest: Record<string, unknown> = {}
-          if (opts.fromPhotos && imageIds.length > 0) {
+          if (opts.fromPhotos && imageNumericIds.length > 0) {
             process.stderr.write('AI-javaslat kérése a képekből...\n')
-            aiSuggest = await shopClient.myAds.fromPhotos(imageIds) as Record<string, unknown>
+            aiSuggest = await shopClient.myAds.fromPhotos(imageNumericIds) as Record<string, unknown>
             process.stdout.write('AI-javaslat:\n')
             printJson(aiSuggest)
           }
 
           const attrs = parseAttrs(opts.attr)
 
-          // Validate required attributes if category+subcategory known
-          // (client-side only if we have taxonomy data; skip if not)
+          const title = opts.title ?? (aiSuggest.title as string | undefined) ?? ''
+          const category = opts.category ?? (aiSuggest.categoryId as string | undefined) ?? ''
+          const condition = opts.condition ?? (aiSuggest.condition as string | undefined) ?? ''
+          const county = opts.county ?? ''
+          const city = opts.city ?? ''
+          const contactEmail = opts.contactEmail ?? ''
 
           const body = {
-            title: opts.title ?? (aiSuggest.title as string | undefined) ?? '',
-            categoryId: opts.category ?? (aiSuggest.categoryId as string | undefined),
-            subcategoryId: opts.subcategory ?? (aiSuggest.subcategoryId as string | undefined),
+            title,
+            category,
+            subcategory: opts.subcategory ?? (aiSuggest.subcategoryId as string | undefined) ?? null,
             priceGross:
               opts.price != null
                 ? parseInt(opts.price, 10)
-                : (aiSuggest.suggestedPriceGross as number | undefined) ?? 0,
+                : (aiSuggest.suggestedPriceGross as number | undefined) ?? null,
             negotiable: opts.negotiable ?? false,
-            condition: opts.condition ?? (aiSuggest.condition as string | undefined),
-            description: opts.description ?? (aiSuggest.description as string | undefined),
-            county: opts.county,
-            city: opts.city,
-            attributes: { ...(aiSuggest.attributes as Record<string, string> | undefined), ...attrs },
-            imageIds,
-            contactName: opts.contactName,
-            contactPhone: opts.contactPhone,
+            condition,
+            description: opts.description ?? (aiSuggest.description as string | undefined) ?? '',
+            county,
+            city,
+            attrs: { ...(aiSuggest.attrs as Record<string, string | number | boolean> | undefined), ...attrs },
+            images: imageUrls,
+            contactName: opts.contactName ?? '',
+            contactPhone: opts.contactPhone ?? null,
+            contactEmail,
             showPhone: opts.showPhone ?? false,
+            resellable: opts.resellable ?? false,
+            partnerCommissionPct: opts.commissionPct ? parseFloat(opts.commissionPct) : 0,
           }
 
           if (!body.title) {
@@ -400,10 +414,20 @@ export function registerShopCommands(
             return
           }
 
-          // Confirmation gate fires whenever --yes is absent, regardless of
-          // whether --from-photos was provided. The dry-run preview already
-          // printed the body above; for the non-dry-run path we print it here
-          // so the user sees what will be posted before confirming.
+          // Validate required fields before sending
+          const missing: string[] = []
+          if (!body.category) missing.push('--category')
+          if (!body.condition) missing.push('--condition')
+          if (!body.county) missing.push('--county')
+          if (!body.city) missing.push('--city')
+          if (!body.contactName) missing.push('--contact-name')
+          if (!body.contactEmail) missing.push('--contact-email')
+          if (missing.length > 0) {
+            process.stderr.write(`Hiányzó kötelező mező${missing.length > 1 ? 'k' : ''}: ${missing.join(', ')}\n`)
+            process.exit(2)
+            return
+          }
+
           if (!opts.yes) {
             process.stdout.write('Hirdetés tervezett adatai:\n')
             printJson(body)
@@ -415,7 +439,7 @@ export function registerShopCommands(
             }
           }
 
-          const ad = await shopClient.myAds.post(body)
+          const ad = await shopClient.myAds.post(body as Parameters<typeof shopClient.myAds.post>[0])
           if (getJsonFlag(cmd)) {
             printJson(ad)
           } else {
@@ -451,14 +475,17 @@ export function registerShopCommands(
     .option('--title <cím>', 'Új cím')
     .option('--price <Ft>', 'Új ár (bruttó Ft)')
     .option('--negotiable', 'Alkuképes')
-    .option('--condition <állapot>', 'Termék állapota')
+    .option('--condition <állapot>', 'Állapot: uj | ujszeru | hasznalt | serult')
     .option('--description <leírás>', 'Leírás')
     .option('--county <megye>', 'Megye')
     .option('--city <város>', 'Város')
     .option('--attr <kulcs=érték>', 'Attribútum', (v: string, a: string[]) => [...a, v], [] as string[])
     .option('--contact-name <név>', 'Kapcsolattartó neve')
     .option('--contact-phone <telefon>', 'Kapcsolattartó telefonszáma')
+    .option('--contact-email <email>', 'Kapcsolattartó e-mail-cím')
     .option('--show-phone', 'Telefonszám megjelenítése')
+    .option('--resellable', 'Viszonteladói jogok engedélyezése')
+    .option('--commission-pct <szám>', 'Viszonteladói jutalék (%)')
     .action(
       async (
         idStr: string,
@@ -473,7 +500,10 @@ export function registerShopCommands(
           attr: string[]
           contactName?: string
           contactPhone?: string
+          contactEmail?: string
           showPhone?: boolean
+          resellable?: boolean
+          commissionPct?: string
         },
         cmd: Command,
       ) => {
@@ -493,10 +523,13 @@ export function registerShopCommands(
           if (opts.description) body.description = opts.description
           if (opts.county) body.county = opts.county
           if (opts.city) body.city = opts.city
-          if (Object.keys(attrs).length > 0) body.attributes = attrs
+          if (Object.keys(attrs).length > 0) body.attrs = attrs
           if (opts.contactName) body.contactName = opts.contactName
           if (opts.contactPhone) body.contactPhone = opts.contactPhone
+          if (opts.contactEmail) body.contactEmail = opts.contactEmail
           if (opts.showPhone !== undefined) body.showPhone = opts.showPhone
+          if (opts.resellable !== undefined) body.resellable = opts.resellable
+          if (opts.commissionPct) body.partnerCommissionPct = parseFloat(opts.commissionPct)
 
           const ad = await shopClient.myAds.edit(id, body)
           if (getJsonFlag(cmd)) {
@@ -598,7 +631,7 @@ export function registerShopCommands(
           }
           for (const item of items) {
             const read = item.readAt ? '' : ' [új]'
-            process.stdout.write(`  #${item.id}${read}  Hirdetés #${item.adId}  ${item.senderName}\n`)
+            process.stdout.write(`  #${item.id}${read}  Hirdetés #${item.adId}  ${item.name}\n`)
             process.stdout.write(`    ${item.message.slice(0, 80)}\n`)
           }
         }
@@ -609,13 +642,24 @@ export function registerShopCommands(
   shop
     .command('inquire <adId>')
     .description('Üzenet küldése eladónak')
-    .option('--message <szöveg>', 'Üzenet szövege')
-    .action(async (adIdStr: string, opts: { message?: string }, cmd: Command) => {
+    .option('--name <név>', 'A feladó neve (kötelező)')
+    .option('--email <email>', 'A feladó e-mail-cím (kötelező)')
+    .option('--phone <telefon>', 'A feladó telefonszáma (opcionális)')
+    .option('--message <szöveg>', 'Üzenet szövege (kötelező)')
+    .action(async (adIdStr: string, opts: { name?: string; email?: string; phone?: string; message?: string }, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
       if (isNaN(adId)) { process.stderr.write('Érvénytelen hirdetés-azonosító.\n'); process.exit(2); return }
+      if (!opts.name) { process.stderr.write('--name megadása kötelező.\n'); process.exit(2); return }
+      if (!opts.email) { process.stderr.write('--email megadása kötelező.\n'); process.exit(2); return }
       if (!opts.message) { process.stderr.write('--message megadása kötelező.\n'); process.exit(2); return }
       try {
-        const result = await shopClient.inquiries.send(adId, { message: opts.message })
+        const body: { name: string; email: string; phone?: string; message: string } = {
+          name: opts.name,
+          email: opts.email,
+          message: opts.message,
+        }
+        if (opts.phone) body.phone = opts.phone
+        const result = await shopClient.inquiries.send(adId, body)
         if (getJsonFlag(cmd)) printJson(result)
         else process.stdout.write('Üzenet elküldve.\n')
       } catch (err) { handleError(err) }
