@@ -1987,6 +1987,10 @@ function createShopClient(opts) {
       list: () => get("/api/v1/auth/tokens", o),
       revoke: (id) => del(`/api/v1/auth/tokens/${id}`, o),
       revokeCurrent: () => post("/api/v1/auth/tokens/revoke-current", {}, o)
+    },
+    sellerProfile: {
+      get: () => get("/api/v1/shop/my/seller-profile", o),
+      set: (body) => put("/api/v1/shop/my/seller-profile", body, o)
     }
   };
 }
@@ -3082,7 +3086,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
       handleError2(err);
     }
   });
-  shop.command("post").description("\xDAj hirdet\xE9s felad\xE1sa").option("--title <c\xEDm>", "Hirdet\xE9s c\xEDme").option("--category <kulcs>", "Kateg\xF3ria kulcsa (pl. elekt)").option("--subcategory <kulcs>", "Alkateg\xF3ria kulcsa").option("--price <Ft>", "V\xE9tel\xE1r (brutt\xF3 Ft, \xFCresen = \xE1r n\xE9lk\xFCl)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "\xC1llapot: uj | ujszeru | hasznalt | serult").option("--description <le\xEDr\xE1s>", "Hirdet\xE9s le\xEDr\xE1sa").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--contact-email <email>", "Kapcsolattart\xF3 e-mail-c\xEDm (k\xF6telez\u0151)").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--resellable", "Viszontelad\xF3i jogok enged\xE9lyez\xE9se").option("--commission-pct <sz\xE1m>", "Viszontelad\xF3i jutal\xE9k (%)", "0").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--image <f\xE1jl>", "K\xE9pf\xE1jl felt\xF6lt\xE9se (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--from-photos", "AI-javaslatot k\xE9r a felt\xF6lt\xF6tt k\xE9pek alapj\xE1n").option("--remove-bg", "H\xE1tt\xE9r elt\xE1vol\xEDt\xE1sa a felt\xF6lt\xF6tt k\xE9pekr\u0151l (AI)").option("--dry-run", "Csak megjelen\xEDti a k\xE9r\xE9st, nem k\xFCldi el").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
+  shop.command("post").description("\xDAj hirdet\xE9s felad\xE1sa").option("--title <c\xEDm>", "Hirdet\xE9s c\xEDme").option("--category <kulcs>", "Kateg\xF3ria kulcsa (pl. elekt)").option("--subcategory <kulcs>", "Alkateg\xF3ria kulcsa").option("--price <Ft>", "V\xE9tel\xE1r (brutt\xF3 Ft, \xFCresen = \xE1r n\xE9lk\xFCl)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "\xC1llapot: uj | ujszeru | hasznalt | serult").option("--defects <sz\xF6veg>", "Hib\xE1k, s\xE9r\xFCl\xE9sek le\xEDr\xE1sa (k\xF6telez\u0151 hasznalt/serult \xE1llapotn\xE1l, min. 10 karakter)").option("--description <le\xEDr\xE1s>", "Hirdet\xE9s le\xEDr\xE1sa").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--contact-email <email>", "Kapcsolattart\xF3 e-mail-c\xEDm (k\xF6telez\u0151)").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--resellable", "Viszontelad\xF3i jogok enged\xE9lyez\xE9se").option("--commission-pct <sz\xE1m>", "Viszontelad\xF3i jutal\xE9k (%)", "0").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--image <f\xE1jl>", "K\xE9pf\xE1jl felt\xF6lt\xE9se (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--from-photos", "AI-javaslatot k\xE9r a felt\xF6lt\xF6tt k\xE9pek alapj\xE1n").option("--remove-bg", "H\xE1tt\xE9r elt\xE1vol\xEDt\xE1sa a felt\xF6lt\xF6tt k\xE9pekr\u0151l (AI)").option("--dry-run", "Csak megjelen\xEDti a k\xE9r\xE9st, nem k\xFCldi el").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
     async (opts, cmd) => {
       try {
         const imageUrls = [];
@@ -3129,6 +3133,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
           priceGross: opts.price != null ? parseInt(opts.price, 10) : aiSuggest.suggestedPriceGross ?? null,
           negotiable: opts.negotiable ?? false,
           condition,
+          defects: opts.defects ?? null,
           description: opts.description ?? aiSuggest.description ?? "",
           county,
           city,
@@ -4038,6 +4043,7 @@ Feladod mind a ${rows.length} hirdet\xE9st?`);
               priceGross: row.price ? parseInt(row.price, 10) : null,
               negotiable: row.negotiable === "true" || row.negotiable === "1",
               condition: row.condition || "hasznalt",
+              defects: row.defects || null,
               county: row.county,
               city: row.city,
               description: row.description || "",
@@ -4069,6 +4075,58 @@ Meg\xE1ll\xE1s az els\u0151 hib\xE1n\xE1l. Feladva: ${posted}/${rows.length}
       process.stdout.write(`
 K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
 `);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const profile = shop.command("profile").description("Elad\xF3i profil kezel\xE9se");
+  const sellerType = profile.command("seller-type").description("Elad\xF3i t\xEDpus be\xE1ll\xEDt\xE1sa (egyszer k\xF6telez\u0151 az els\u0151 hirdet\xE9s felad\xE1s\xE1hoz)");
+  sellerType.command("maganszemely").description("Mag\xE1nszem\xE9ly elad\xF3k\xE9nt regisztr\xE1l").action(async (_opts2, cmd) => {
+    try {
+      const body = { sellerType: "maganszemely" };
+      const result = await shopClient2.sellerProfile.set(body);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write("Elad\xF3i t\xEDpus be\xE1ll\xEDtva: mag\xE1nszem\xE9ly.\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  sellerType.command("kereskedo").description("Keresked\u0151k\xE9nt (c\xE9gk\xE9nt) regisztr\xE1l").requiredOption("--company-name <n\xE9v>", "C\xE9g neve").requiredOption("--company-address <c\xEDm>", "C\xE9g sz\xE9khelye").option("--company-reg-number <sz\xE1m>", "C\xE9gjegyz\xE9ksz\xE1m (opcion\xE1lis)").action(async (opts, cmd) => {
+    try {
+      const body = {
+        sellerType: "kereskedo",
+        companyName: opts.companyName,
+        companyAddress: opts.companyAddress,
+        companyRegNumber: opts.companyRegNumber ?? null
+      };
+      const result = await shopClient2.sellerProfile.set(body);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Elad\xF3i t\xEDpus be\xE1ll\xEDtva: keresked\u0151 (${opts.companyName}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  profile.command("show").description("Aktu\xE1lis elad\xF3i profil megjelen\xEDt\xE9se").action(async (_opts2, cmd) => {
+    try {
+      const result = await shopClient2.sellerProfile.get();
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else {
+        if (!result.sellerType) {
+          process.stdout.write("Elad\xF3i t\xEDpus m\xE9g nincs be\xE1ll\xEDtva.\nHaszn\xE1ld: haszno shop profile seller-type maganszemely\n");
+        } else {
+          process.stdout.write(`Elad\xF3i t\xEDpus: ${result.sellerType}
+`);
+          if (result.companyName) process.stdout.write(`  C\xE9g neve: ${result.companyName}
+`);
+          if (result.companyAddress) process.stdout.write(`  Sz\xE9khely: ${result.companyAddress}
+`);
+          if (result.companyRegNumber) process.stdout.write(`  C\xE9gjegyz\xE9k: ${result.companyRegNumber}
+`);
+          if (result.declaredAt) process.stdout.write(`  Be\xE1ll\xEDtva: ${result.declaredAt}
+`);
+        }
+      }
     } catch (err) {
       handleError2(err);
     }

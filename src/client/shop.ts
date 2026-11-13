@@ -200,6 +200,18 @@ export interface ShopApiToken {
   expiresAt: string | null
 }
 
+export interface ShopSellerProfile {
+  sellerType: 'maganszemely' | 'kereskedo' | null
+  companyName: string | null
+  companyAddress: string | null
+  companyRegNumber: string | null
+  declaredAt: string | null
+}
+
+export type ShopSellerProfileInput =
+  | { sellerType: 'maganszemely' }
+  | { sellerType: 'kereskedo'; companyName: string; companyAddress: string; companyRegNumber?: string | null }
+
 export interface ShopInquiry {
   id: number
   adId: number
@@ -251,6 +263,8 @@ export interface ShopAdPostBody {
   priceGross: number | null
   negotiable: boolean
   condition: 'uj' | 'ujszeru' | 'hasznalt' | 'serult'
+  /** Required (min 10 chars) when condition is 'hasznalt' or 'serult'. */
+  defects?: string | null
   county: string
   city: string
   images: string[]
@@ -453,6 +467,10 @@ export interface ShopHasznoClient {
     revoke(id: number): Promise<{ ok: boolean }>
     revokeCurrent(): Promise<{ ok: boolean }>
   }
+  sellerProfile: {
+    get(): Promise<ShopSellerProfile>
+    set(body: ShopSellerProfileInput): Promise<ShopSellerProfile>
+  }
 }
 
 const SORT_MAP: Record<string, string> = {
@@ -599,6 +617,11 @@ export function createShopClient(opts: HttpOptions): ShopHasznoClient {
       list: () => get('/api/v1/auth/tokens', o),
       revoke: (id) => del(`/api/v1/auth/tokens/${id}`, o),
       revokeCurrent: () => post('/api/v1/auth/tokens/revoke-current', {}, o),
+    },
+
+    sellerProfile: {
+      get: () => get('/api/v1/shop/my/seller-profile', o),
+      set: (body) => put('/api/v1/shop/my/seller-profile', body, o),
     },
   }
 }

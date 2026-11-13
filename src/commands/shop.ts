@@ -57,6 +57,7 @@ import type {
   ShopReservation,
   ShopReservationSimple,
   ShopSavedSearchFilters,
+  ShopSellerProfileInput,
 } from '../client/shop.js'
 import { handleError, printJson } from './account.js'
 import { HasznoApiError } from '../client/index.js'
@@ -335,6 +336,7 @@ export function registerShopCommands(
     .option('--price <Ft>', 'Vételár (bruttó Ft, üresen = ár nélkül)')
     .option('--negotiable', 'Alkuképes')
     .option('--condition <állapot>', 'Állapot: uj | ujszeru | hasznalt | serult')
+    .option('--defects <szöveg>', 'Hibák, sérülések leírása (kötelező hasznalt/serult állapotnál, min. 10 karakter)')
     .option('--description <leírás>', 'Hirdetés leírása')
     .option('--county <megye>', 'Megye')
     .option('--city <város>', 'Város')
@@ -359,6 +361,7 @@ export function registerShopCommands(
           price?: string
           negotiable?: boolean
           condition?: string
+          defects?: string
           description?: string
           county?: string
           city?: string
@@ -429,6 +432,7 @@ export function registerShopCommands(
                 : (aiSuggest.suggestedPriceGross as number | undefined) ?? null,
             negotiable: opts.negotiable ?? false,
             condition,
+            defects: opts.defects ?? null,
             description: opts.description ?? (aiSuggest.description as string | undefined) ?? '',
             county,
             city,
@@ -1246,6 +1250,7 @@ export function registerShopCommands(
           price?: string
           negotiable?: string
           condition: string
+          defects?: string
           description?: string
           county: string
           city: string
@@ -1392,6 +1397,7 @@ export function registerShopCommands(
                 priceGross: row.price ? parseInt(row.price, 10) : null,
                 negotiable: row.negotiable === 'true' || row.negotiable === '1',
                 condition: row.condition || 'hasznalt',
+                defects: row.defects || null,
                 county: row.county,
                 city: row.city,
                 description: row.description || '',
@@ -1417,6 +1423,69 @@ export function registerShopCommands(
           }
         }
         process.stdout.write(`\nKész. Feladva: ${posted}/${rows.length} hirdetés.\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── profile ───────────────────────────────────────────────────────────────
+  // Eladói profil — az első hirdetés feladásához egyszeri beállítás szükséges.
+  const profile = shop
+    .command('profile')
+    .description('Eladói profil kezelése')
+
+  const sellerType = profile
+    .command('seller-type')
+    .description('Eladói típus beállítása (egyszer kötelező az első hirdetés feladásához)')
+
+  sellerType
+    .command('maganszemely')
+    .description('Magánszemély eladóként regisztrál')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const body: ShopSellerProfileInput = { sellerType: 'maganszemely' }
+        const result = await shopClient.sellerProfile.set(body)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write('Eladói típus beállítva: magánszemély.\n')
+      } catch (err) { handleError(err) }
+    })
+
+  sellerType
+    .command('kereskedo')
+    .description('Kereskedőként (cégként) regisztrál')
+    .requiredOption('--company-name <név>', 'Cég neve')
+    .requiredOption('--company-address <cím>', 'Cég székhelye')
+    .option('--company-reg-number <szám>', 'Cégjegyzékszám (opcionális)')
+    .action(async (opts: { companyName: string; companyAddress: string; companyRegNumber?: string }, cmd: Command) => {
+      try {
+        const body: ShopSellerProfileInput = {
+          sellerType: 'kereskedo',
+          companyName: opts.companyName,
+          companyAddress: opts.companyAddress,
+          companyRegNumber: opts.companyRegNumber ?? null,
+        }
+        const result = await shopClient.sellerProfile.set(body)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Eladói típus beállítva: kereskedő (${opts.companyName}).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  profile
+    .command('show')
+    .description('Aktuális eladói profil megjelenítése')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const result = await shopClient.sellerProfile.get()
+        if (getJsonFlag(cmd)) printJson(result)
+        else {
+          if (!result.sellerType) {
+            process.stdout.write('Eladói típus még nincs beállítva.\nHasználd: haszno shop profile seller-type maganszemely\n')
+          } else {
+            process.stdout.write(`Eladói típus: ${result.sellerType}\n`)
+            if (result.companyName) process.stdout.write(`  Cég neve: ${result.companyName}\n`)
+            if (result.companyAddress) process.stdout.write(`  Székhely: ${result.companyAddress}\n`)
+            if (result.companyRegNumber) process.stdout.write(`  Cégjegyzék: ${result.companyRegNumber}\n`)
+            if (result.declaredAt) process.stdout.write(`  Beállítva: ${result.declaredAt}\n`)
+          }
+        }
       } catch (err) { handleError(err) }
     })
 }
