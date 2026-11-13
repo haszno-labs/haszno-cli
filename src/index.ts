@@ -29,6 +29,8 @@ import { registerAccountCommands } from './commands/account.js'
 import { registerCatalogueCommands } from './commands/catalogue.js'
 import { registerPeersCommands } from './commands/peers.js'
 import { registerBlogCommands } from './commands/blog.js'
+import { registerShopCommands } from './commands/shop.js'
+import { createShopClient } from './client/shop.js'
 
 const program = new Command()
   .name('haszno')
@@ -56,7 +58,9 @@ function argvFlag(name: string): string | undefined {
   return undefined
 }
 
-const client = buildClient({ apiUrl: argvFlag('--api-url'), apiKey: argvFlag('--api-key') })
+const sharedOpts = { baseUrl: argvFlag('--api-url'), apiKey: argvFlag('--api-key') }
+const client = buildClient(sharedOpts)
+const shopClient = createShopClient(sharedOpts)
 
 registerCatalogCommands(program, client)
 registerProductsCommands(program, client)
@@ -69,5 +73,6 @@ registerAccountCommands(program, client)
 registerCatalogueCommands(program, client)
 registerPeersCommands(program, client)
 registerBlogCommands(program, client)
+registerShopCommands(program, shopClient)
 
 program.parse()

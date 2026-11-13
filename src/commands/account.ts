@@ -1,9 +1,11 @@
 /**
  * CLI commands — account domain.
  *
- * Top-level subcommand:
- *   haszno login                     save API credentials to ~/.config/haszno/config.json
- *   haszno configure                 alias for login
+ * Top-level subcommands:
+ *   haszno login                     bejelentkezés e-maillel+jelszóval → token mentése
+ *   haszno logout                    token törlése a konfigurációs fájlból
+ *   haszno whoami                    aktuális felhasználó megjelenítése
+ *   haszno configure                 API kulcs közvetlen mentése (régi flow, alias-szerű)
  *
  * account sub-group:
  *   haszno account ping              check API connectivity (exit 0 ok, 1 hiba)
@@ -18,7 +20,7 @@
  * Config file format (~/.config/haszno/config.json):
  *   {
  *     "apiUrl": "https://haszno.com",   // optional, overrides default
- *     "apiKey": "haszno_live_..."          // your API key
+ *     "apiKey": "haszno_live_..."       // shop token (written by `haszno login`)
  *   }
  * This file is shared with the MCP server (haszno-mcp) — running `haszno login`
  * once configures both the CLI and the MCP server.
@@ -31,6 +33,8 @@ import type { Command } from 'commander'
 import type { HasznoClient } from '../client/index.js'
 import { HasznoApiError } from '../client/index.js'
 import { CONFIG_PATH, readConfigFile, readConfigObject, type HasznoConfig } from '../client/config.js'
+import { type HttpOptions } from '../client/http.js'
+import { cliLogin } from '../client/shop.js'
 
 export { CONFIG_PATH, LEGACY_CONFIG_PATH, readConfigFile, type HasznoConfig } from '../client/config.js'
 
@@ -104,18 +108,171 @@ async function askInput(message: string): Promise<string> {
 export interface RegisterAccountOptions {
   /** Override the config file path — useful in tests. */
   configPath?: string
+  /** Override HTTP opts for the login call — useful in tests (inject mock fetch). */
+  httpOpts?: HttpOptions
+}
+
+// ── Password prompt (no echo) ─────────────────────────────────────────────────
+
+async function readPasswordNoEcho(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    // Non-TTY: read a plain line (e.g. piped input or automated test)
+    const rl = createInterface({ input: process.stdin })
+    return new Promise<string>((resolve) => {
+      rl.once('line', (line) => { rl.close(); resolve(line.trim()) })
+    })
+  }
+  // TTY: switch to raw mode so characters are not echoed
+  process.stderr.write(prompt)
+  process.stdin.setRawMode(true)
+  process.stdin.resume()
+  return new Promise<string>((resolve) => {
+    const chars: string[] = []
+    const onData = (buf: Buffer) => {
+      const ch = buf.toString()
+      if (ch === '\r' || ch === '\n') {
+        process.stdin.setRawMode(false)
+        process.stdin.pause()
+        process.stdin.removeListener('data', onData)
+        process.stderr.write('\n')
+        resolve(chars.join(''))
+      } else if (ch === '\x03') {
+        // Ctrl-C
+        process.stdin.setRawMode(false)
+        process.stdin.pause()
+        process.exit(1)
+      } else if (ch === '\x7f' || ch === '\x08') {
+        // Backspace / DEL
+        chars.pop()
+      } else {
+        chars.push(ch)
+      }
+    }
+    process.stdin.on('data', onData)
+  })
 }
 
 export function registerAccountCommands(
   program: Command,
   client: HasznoClient,
-  { configPath = CONFIG_PATH }: RegisterAccountOptions = {},
+  { configPath = CONFIG_PATH, httpOpts = {} }: RegisterAccountOptions = {},
 ): void {
 
-  // ── login (top-level) ─────────────────────────────────────────────────────
-  const loginAction = async (opts: { apiUrl?: string; apiKey?: string }, cmd?: Command) => {
-    // --api-url / --api-key are also global options, and commander hands a flag that exists on both
-    // levels to the program — so read the merged view, otherwise `haszno login --api-key …` sees nothing.
+  // ── login (top-level, email+password → token) ─────────────────────────────
+  program
+    .command('login')
+    .description('Bejelentkezés e-mail/jelszóval; az API-token elmentése (~/.config/haszno/config.json)')
+    .option('--api-url <url>', 'Haszno API alap URL-je (env: HASZNO_API_URL)')
+    .option('--label <name>', 'Token neve (alapért.: "CLI")', 'CLI')
+    .option('--show-token', 'Token megjelenítése mentés után')
+    .action(
+      async (
+        opts: { apiUrl?: string; label?: string; showToken?: boolean },
+        cmd: Command,
+      ) => {
+        const globals = (cmd?.optsWithGlobals() ?? {}) as { apiUrl?: string }
+        // A token ahhoz a szerverhez tartozik, ahol kiadták: a környezeti változóból jövő URL-t is elmentjük.
+        const apiUrl = opts.apiUrl ?? globals.apiUrl ?? (process.env['HASZNO_API_URL'] || undefined)
+
+        // Read credentials from env or interactive prompt
+        let email = process.env['HASZNO_EMAIL'] ?? ''
+        let password = process.env['HASZNO_PASSWORD'] ?? ''
+
+        if (!email || !password) {
+          if (!process.stdin.isTTY) {
+            process.stderr.write(
+              'Interaktív mód TTY nélkül nem elérhető. ' +
+              'Állítsd be a HASZNO_EMAIL és HASZNO_PASSWORD változókat.\n',
+            )
+            process.exit(2)
+            return
+          }
+          process.stdout.write('Haszno bejelentkezés\n')
+          if (!email) email = await askInput('E-mail cím: ')
+          if (!password) password = await readPasswordNoEcho('Jelszó: ')
+        }
+
+        try {
+          const loginOpts: HttpOptions = { ...httpOpts, baseUrl: apiUrl }
+          const result = await cliLogin(
+            { email, password, label: opts.label ?? 'CLI' },
+            loginOpts,
+          )
+
+          const existing: HasznoConfig & Record<string, unknown> = {
+            ...readConfigFile(configPath),
+            ...readConfigObject(configPath),
+          }
+          existing.apiKey = result.token
+          if (apiUrl) existing.apiUrl = apiUrl
+          // Store user info for `whoami` without needing a server call
+          ;(existing as Record<string, unknown>)['userEmail'] = result.user.email
+          ;(existing as Record<string, unknown>)['userName'] = result.user.name
+          ;(existing as Record<string, unknown>)['shopName'] = result.user.shopName
+
+          writeConfigFile(existing, configPath)
+
+          process.stdout.write(
+            `Bejelentkezve: ${result.user.name} <${result.user.email}>${result.user.shopName ? ` (${result.user.shopName})` : ''}\n` +
+            `Token elmentve: ${configPath}\n`,
+          )
+          if (opts.showToken) {
+            process.stdout.write(`Token: ${result.token}\n`)
+          }
+          process.stdout.write(
+            '\nMegjegyzés: az MCP szerver (haszno-mcp) is ebből a fájlból olvas,\n' +
+            'ezért elegendő egyszer futtatni a `haszno login` parancsot.\n',
+          )
+        } catch (err) {
+          handleError(err)
+        }
+      },
+    )
+
+  // ── logout (top-level) ────────────────────────────────────────────────────
+  program
+    .command('logout')
+    .description('API-token törlése a konfigurációs fájlból')
+    .action(async (_opts: Record<string, unknown>, _cmd: Command) => {
+      const existing: Record<string, unknown> = { ...readConfigObject(configPath) }
+      delete existing['apiKey']
+      delete existing['userEmail']
+      delete existing['userName']
+      delete existing['shopName']
+      writeConfigFile(existing as HasznoConfig, configPath)
+      process.stdout.write(`Kijelentkezve. Token törölve: ${configPath}\n`)
+    })
+
+  // ── whoami (top-level) ────────────────────────────────────────────────────
+  program
+    .command('whoami')
+    .description('Aktuális felhasználó és bejelentkezési állapot')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      const cfg = readConfigObject(configPath) as Record<string, unknown>
+      const apiKey = cfg['apiKey'] as string | undefined
+      const userEmail = cfg['userEmail'] as string | undefined
+      const userName = cfg['userName'] as string | undefined
+      const shopName = cfg['shopName'] as string | undefined
+      const apiUrl = (cfg['apiUrl'] as string | undefined) ?? 'https://haszno.com'
+
+      const data = { userEmail, userName, shopName, apiUrl, authenticated: !!apiKey }
+      if (getJsonFlag(cmd)) {
+        printJson(data)
+      } else {
+        if (!apiKey) {
+          process.stdout.write('Nincs mentett token. Futtasd: haszno login\n')
+          return
+        }
+        process.stdout.write(`Felhasználó: ${userName ?? '(ismeretlen)'}\n`)
+        process.stdout.write(`E-mail:      ${userEmail ?? '(ismeretlen)'}\n`)
+        if (shopName) process.stdout.write(`Bolt:        ${shopName}\n`)
+        process.stdout.write(`API URL:     ${apiUrl}\n`)
+        process.stdout.write(`Token:       ${apiKey.slice(0, 12)}...\n`)
+      }
+    })
+
+  // ── configure (key-based login, backward-compat) ──────────────────────────
+  const configureAction = async (opts: { apiUrl?: string; apiKey?: string }, cmd?: Command) => {
     const globals = (cmd?.optsWithGlobals() ?? {}) as { apiUrl?: string; apiKey?: string }
     let apiUrl = opts.apiUrl ?? globals.apiUrl
     let apiKey = opts.apiKey ?? globals.apiKey
@@ -129,14 +286,12 @@ export function registerAccountCommands(
         process.exit(2)
         return
       }
-      process.stdout.write('Haszno CLI bejelentkezés\n')
+      process.stdout.write('Haszno CLI konfiguráció\n')
       process.stdout.write(`Konfigurációs fájl: ${configPath}\n\n`)
       apiUrl = await askInput('API URL (Enter = alapértelmezett https://haszno.com): ')
       apiKey = await askInput('API kulcs: ')
     }
 
-    // Keep whatever is already in the file (including keys this CLI does not know, e.g. basicAuth);
-    // readConfigFile also carries values over from the legacy arfutar file on the first save.
     const updated: HasznoConfig & Record<string, unknown> = { ...readConfigFile(configPath), ...readConfigObject(configPath) }
     if (apiUrl) updated.apiUrl = apiUrl
     if (apiKey) updated.apiKey = apiKey
@@ -147,24 +302,16 @@ export function registerAccountCommands(
       'Az HASZNO_API_URL / HASZNO_API_KEY környezeti változók és a\n' +
       '--api-url / --api-key jelzők prioritást élveznek a fájllal szemben.\n' +
       '\nMegjegyzés: az MCP szerver (haszno-mcp) is ebből a fájlból olvas,\n' +
-      'ezért elegendő egyszer futtatni a `haszno login` parancsot.\n',
+      'ezért elegendő egyszer futtatni a `haszno configure` parancsot.\n',
     )
   }
 
   program
-    .command('login')
-    .description('Haszno API hitelesítési adatok mentése (~/.config/haszno/config.json)')
-    .option('--api-url <url>', 'Haszno API alap URL-je')
-    .option('--api-key <key>', 'Haszno API kulcs')
-    .action(loginAction)
-
-  // ── configure (alias for login) ───────────────────────────────────────────
-  program
     .command('configure')
-    .description('API hitelesítési adatok mentése (alias: haszno login)')
+    .description('API kulcs közvetlen mentése (haszno configure --api-key <kulcs>)')
     .option('--api-url <url>', 'Haszno API alap URL-je')
     .option('--api-key <key>', 'Haszno API kulcs')
-    .action(loginAction)
+    .action(configureAction)
 
   // ── account sub-group ─────────────────────────────────────────────────────
   const account = program
