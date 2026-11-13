@@ -74,6 +74,62 @@ This saves your API key and URL to `~/.config/haszno/config.json`.
 
 ---
 
+## Haszno Shop
+
+The `haszno shop` command group lets you post, search and reserve secondhand ads in the Haszno marketplace. The Shop is completely free — posting and reserving cost nothing, and payment happens directly between buyer and seller.
+
+### Quick start
+
+```bash
+# 1. Log in (saves token to ~/.config/haszno/config.json)
+haszno login
+
+# 2. Post an ad (AI fills title/description from photos)
+haszno shop post --from-photos --image ./photo1.jpg --price 15000
+
+# 3. Search for ads
+haszno shop search kerékpár --county Budapest --max-price 50000
+
+# 4. Reserve an ad (free — payment handled directly with the seller)
+haszno shop reserve 42 --message "Érdeklődöm, lehet-e személyesen megnézni?"
+
+# 5. Check your reservations
+haszno shop reservations
+```
+
+### Shop commands overview
+
+| Command | Description |
+|---|---|
+| `haszno login` | Log in with e-mail + password; saves token |
+| `haszno logout` | Remove saved token |
+| `haszno whoami` | Show current user info |
+| `haszno shop categories` | Browse ad categories and required attributes |
+| `haszno shop search [query]` | Search ads (--category, --county, --min-price, …) |
+| `haszno shop show <id>` | Show ad details |
+| `haszno shop price-hint` | Suggested price range for a category |
+| `haszno shop post` | Post a new ad (--title, --price, --image, --from-photos, …) |
+| `haszno shop my` | List your own ads |
+| `haszno shop edit <id>` | Edit an ad |
+| `haszno shop pause <id>` | Pause an ad |
+| `haszno shop activate <id>` | Re-activate a paused ad |
+| `haszno shop sold <id>` | Mark an ad as sold |
+| `haszno shop renew <id>` | Renew an expiring ad |
+| `haszno shop delete <id>` | Delete an ad |
+| `haszno shop inquiries` | List messages received on your ads |
+| `haszno shop inquire <adId>` | Send a message to the seller |
+| `haszno shop favorite <adId>` | Save ad to favorites |
+| `haszno shop unfavorite <adId>` | Remove from favorites |
+| `haszno shop favorites` | List your favorite ads |
+| `haszno shop reserve <adId>` | Reserve an ad (free) |
+| `haszno shop reservations` | List your reservations |
+| `haszno shop reservation accept <id>` | Accept a reservation (as seller) |
+| `haszno shop reservation decline <id>` | Decline a reservation (as seller) |
+| `haszno shop reservation cancel <id>` | Cancel a reservation (as buyer) |
+| `haszno shop reservation complete <id>` | Mark a reservation as complete (as seller) |
+
+---
+
 ## Usage
 
 ```bash

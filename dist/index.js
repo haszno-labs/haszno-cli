@@ -1455,8 +1455,8 @@ Rendel\xE9s #${o.id}`);
 }
 async function interactiveConfirm(question) {
   if (!process.stdin.isTTY) return false;
-  const { createInterface: createInterface4 } = await import("readline");
-  const rl = createInterface4({ input: process.stdin, output: process.stdout });
+  const { createInterface: createInterface5 } = await import("readline");
+  const rl = createInterface5({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(`${question} [i/n] `, (answer) => {
       rl.close();
@@ -1936,6 +1936,138 @@ function registerFeedsCommands(program2, client2) {
 import { writeFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import { createInterface as createInterface3 } from "readline";
+
+// src/client/shop.ts
+import { readFileSync as readFileSync2 } from "fs";
+import { basename } from "path";
+var CLI_VERSION2 = "0.1.0";
+async function uploadShopImage(filePath, opts) {
+  const conn = resolveConnection(opts, process.env, opts.readConfig);
+  const fetchFn = opts.fetch ?? fetch;
+  const fileContent = readFileSync2(filePath);
+  const filename = basename(filePath);
+  const form = new FormData();
+  form.append("image", new Blob([fileContent]), filename);
+  const headers = {
+    "User-Agent": `haszno-cli/${CLI_VERSION2}`,
+    Accept: "application/json"
+  };
+  if (conn.apiKey) {
+    if (isShopToken(conn.apiKey)) {
+      headers["Authorization"] = `Bearer ${conn.apiKey}`;
+    } else {
+      headers["x-api-key"] = conn.apiKey;
+    }
+  }
+  if (conn.basicAuth) {
+    headers["Authorization"] = `Basic ${Buffer.from(conn.basicAuth).toString("base64")}`;
+  }
+  const url = `${conn.baseUrl}/api/v1/shop/my/images`;
+  const response = await fetchFn(url, { method: "POST", headers, body: form });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const json = await response.json();
+      if (json.error) message = json.error;
+    } catch {
+    }
+    throw new HasznoApiError(response.status, message);
+  }
+  return response.json();
+}
+async function cliLogin(body, opts) {
+  const conn = resolveConnection({ baseUrl: opts.baseUrl }, process.env, () => ({}));
+  const fetchFn = opts.fetch ?? fetch;
+  const url = `${conn.baseUrl}/api/v1/auth/cli-login`;
+  const response = await fetchFn(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": `haszno-cli/${CLI_VERSION2}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const json = await response.json();
+      if (json.error) message = json.error;
+    } catch {
+    }
+    throw new HasznoApiError(response.status, message);
+  }
+  return response.json();
+}
+function createShopClient(opts) {
+  const o = opts;
+  return {
+    categories: {
+      list: () => get("/api/v1/shop/categories", o)
+    },
+    ads: {
+      search: (params = {}) => {
+        const qs = new URLSearchParams();
+        if (params.q) qs.set("q", params.q);
+        if (params.category) qs.set("category", params.category);
+        if (params.subcategory) qs.set("subcategory", params.subcategory);
+        if (params.minPrice != null) qs.set("minPrice", String(params.minPrice));
+        if (params.maxPrice != null) qs.set("maxPrice", String(params.maxPrice));
+        if (params.county) qs.set("county", params.county);
+        if (params.city) qs.set("city", params.city);
+        if (params.sort) qs.set("sort", params.sort);
+        if (params.page != null) qs.set("page", String(params.page));
+        const suffix = qs.toString() ? `?${qs.toString()}` : "";
+        return get(`/api/v1/shop/ads${suffix}`, o);
+      },
+      get: (id) => get(`/api/v1/shop/ads/${id}`, o),
+      priceHint: (params = {}) => {
+        const qs = new URLSearchParams();
+        if (params.categoryId) qs.set("categoryId", params.categoryId);
+        if (params.subcategoryId) qs.set("subcategoryId", params.subcategoryId);
+        const suffix = qs.toString() ? `?${qs.toString()}` : "";
+        return get(`/api/v1/shop/price-hint${suffix}`, o);
+      }
+    },
+    myAds: {
+      list: () => get("/api/v1/shop/my/ads", o),
+      post: (body) => post("/api/v1/shop/my/ads", body, o),
+      edit: (id, body) => patch(`/api/v1/shop/my/ads/${id}`, body, o),
+      pause: (id) => post(`/api/v1/shop/my/ads/${id}/pause`, null, o),
+      activate: (id) => post(`/api/v1/shop/my/ads/${id}/activate`, null, o),
+      sold: (id, body = {}) => post(`/api/v1/shop/my/ads/${id}/sold`, body, o),
+      renew: (id) => post(`/api/v1/shop/my/ads/${id}/renew`, null, o),
+      delete: (id) => del(`/api/v1/shop/my/ads/${id}`, o),
+      uploadImage: (filePath) => uploadShopImage(filePath, o),
+      fromPhotos: (imageIds) => post("/api/v1/shop/assist/from-photos", { imageIds }, o)
+    },
+    inquiries: {
+      listReceived: () => get("/api/v1/shop/my/inquiries", o),
+      send: (adId, body) => post(`/api/v1/shop/ads/${adId}/inquiries`, body, o)
+    },
+    favorites: {
+      list: () => get("/api/v1/shop/my/favorites", o),
+      add: (adId) => post(`/api/v1/shop/my/favorites/${adId}`, null, o),
+      remove: (adId) => del(`/api/v1/shop/my/favorites/${adId}`, o)
+    },
+    reservations: {
+      create: (adId, body) => post(`/api/v1/shop/ads/${adId}/reservations`, body, o),
+      list: (params = {}) => {
+        const qs = new URLSearchParams();
+        qs.set("role", params.role ?? "buyer");
+        if (params.status) qs.set("status", params.status);
+        if (params.page != null) qs.set("page", String(params.page));
+        return get(`/api/v1/shop/my/reservations?${qs.toString()}`, o);
+      },
+      accept: (id, body = {}) => post(`/api/v1/shop/my/reservations/${id}/accept`, body, o),
+      decline: (id) => post(`/api/v1/shop/my/reservations/${id}/decline`, null, o),
+      cancel: (id) => post(`/api/v1/shop/my/reservations/${id}/cancel`, null, o),
+      complete: (id, body = {}) => post(`/api/v1/shop/my/reservations/${id}/complete`, body, o)
+    }
+  };
+}
+
+// src/commands/account.ts
 function writeConfigFile(config, configPath = CONFIG_PATH) {
   const dir = dirname(configPath);
   mkdirSync(dir, { recursive: true, mode: 448 });
@@ -1990,8 +2122,132 @@ async function askInput(message) {
     });
   });
 }
-function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH } = {}) {
-  const loginAction = async (opts, cmd) => {
+async function readPasswordNoEcho(prompt) {
+  if (!process.stdin.isTTY) {
+    const rl = createInterface3({ input: process.stdin });
+    return new Promise((resolve) => {
+      rl.once("line", (line) => {
+        rl.close();
+        resolve(line.trim());
+      });
+    });
+  }
+  process.stderr.write(prompt);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  return new Promise((resolve) => {
+    const chars = [];
+    const onData = (buf) => {
+      const ch = buf.toString();
+      if (ch === "\r" || ch === "\n") {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener("data", onData);
+        process.stderr.write("\n");
+        resolve(chars.join(""));
+      } else if (ch === "") {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.exit(1);
+      } else if (ch === "\x7F" || ch === "\b") {
+        chars.pop();
+      } else {
+        chars.push(ch);
+      }
+    };
+    process.stdin.on("data", onData);
+  });
+}
+function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH, httpOpts = {} } = {}) {
+  program2.command("login").description("Bejelentkez\xE9s e-mail/jelsz\xF3val; az API-token elment\xE9se (~/.config/haszno/config.json)").option("--api-url <url>", "Haszno API alap URL-je (env: HASZNO_API_URL)").option("--label <name>", 'Token neve (alap\xE9rt.: "CLI")', "CLI").option("--show-token", "Token megjelen\xEDt\xE9se ment\xE9s ut\xE1n").action(
+    async (opts, cmd) => {
+      const globals = cmd?.optsWithGlobals() ?? {};
+      const apiUrl = opts.apiUrl ?? globals.apiUrl;
+      let email = process.env["HASZNO_EMAIL"] ?? "";
+      let password = process.env["HASZNO_PASSWORD"] ?? "";
+      if (!email || !password) {
+        if (!process.stdin.isTTY) {
+          process.stderr.write(
+            "Interakt\xEDv m\xF3d TTY n\xE9lk\xFCl nem el\xE9rhet\u0151. \xC1ll\xEDtsd be a HASZNO_EMAIL \xE9s HASZNO_PASSWORD v\xE1ltoz\xF3kat.\n"
+          );
+          process.exit(2);
+          return;
+        }
+        process.stdout.write("Haszno bejelentkez\xE9s\n");
+        if (!email) email = await askInput("E-mail c\xEDm: ");
+        if (!password) password = await readPasswordNoEcho("Jelsz\xF3: ");
+      }
+      try {
+        const loginOpts = { ...httpOpts, baseUrl: apiUrl };
+        const result = await cliLogin(
+          { email, password, label: opts.label ?? "CLI" },
+          loginOpts
+        );
+        const existing = {
+          ...readConfigFile(configPath),
+          ...readConfigObject(configPath)
+        };
+        existing.apiKey = result.token;
+        if (apiUrl) existing.apiUrl = apiUrl;
+        existing["userEmail"] = result.user.email;
+        existing["userName"] = result.user.name;
+        existing["shopName"] = result.user.shopName;
+        writeConfigFile(existing, configPath);
+        process.stdout.write(
+          `Bejelentkezve: ${result.user.name} <${result.user.email}>${result.user.shopName ? ` (${result.user.shopName})` : ""}
+Token elmentve: ${configPath}
+`
+        );
+        if (opts.showToken) {
+          process.stdout.write(`Token: ${result.token}
+`);
+        }
+        process.stdout.write(
+          "\nMegjegyz\xE9s: az MCP szerver (haszno-mcp) is ebb\u0151l a f\xE1jlb\xF3l olvas,\nez\xE9rt elegend\u0151 egyszer futtatni a `haszno login` parancsot.\n"
+        );
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  program2.command("logout").description("API-token t\xF6rl\xE9se a konfigur\xE1ci\xF3s f\xE1jlb\xF3l").action(async (_opts, _cmd) => {
+    const existing = { ...readConfigObject(configPath) };
+    delete existing["apiKey"];
+    delete existing["userEmail"];
+    delete existing["userName"];
+    delete existing["shopName"];
+    writeConfigFile(existing, configPath);
+    process.stdout.write(`Kijelentkezve. Token t\xF6r\xF6lve: ${configPath}
+`);
+  });
+  program2.command("whoami").description("Aktu\xE1lis felhaszn\xE1l\xF3 \xE9s bejelentkez\xE9si \xE1llapot").action(async (_opts, cmd) => {
+    const cfg = readConfigObject(configPath);
+    const apiKey = cfg["apiKey"];
+    const userEmail = cfg["userEmail"];
+    const userName = cfg["userName"];
+    const shopName = cfg["shopName"];
+    const apiUrl = cfg["apiUrl"] ?? "https://haszno.com";
+    const data = { userEmail, userName, shopName, apiUrl, authenticated: !!apiKey };
+    if (getJsonFlag(cmd)) {
+      printJson3(data);
+    } else {
+      if (!apiKey) {
+        process.stdout.write("Nincs mentett token. Futtasd: haszno login\n");
+        return;
+      }
+      process.stdout.write(`Felhaszn\xE1l\xF3: ${userName ?? "(ismeretlen)"}
+`);
+      process.stdout.write(`E-mail:      ${userEmail ?? "(ismeretlen)"}
+`);
+      if (shopName) process.stdout.write(`Bolt:        ${shopName}
+`);
+      process.stdout.write(`API URL:     ${apiUrl}
+`);
+      process.stdout.write(`Token:       ${apiKey.slice(0, 12)}...
+`);
+    }
+  });
+  const configureAction = async (opts, cmd) => {
     const globals = cmd?.optsWithGlobals() ?? {};
     let apiUrl = opts.apiUrl ?? globals.apiUrl;
     let apiKey = opts.apiKey ?? globals.apiKey;
@@ -2003,7 +2259,7 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH }
         process.exit(2);
         return;
       }
-      process.stdout.write("Haszno CLI bejelentkez\xE9s\n");
+      process.stdout.write("Haszno CLI konfigur\xE1ci\xF3\n");
       process.stdout.write(`Konfigur\xE1ci\xF3s f\xE1jl: ${configPath}
 
 `);
@@ -2017,11 +2273,10 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH }
     process.stdout.write(`Konfigur\xE1ci\xF3s f\xE1jl elmentve: ${configPath}
 `);
     process.stdout.write(
-      "Az HASZNO_API_URL / HASZNO_API_KEY k\xF6rnyezeti v\xE1ltoz\xF3k \xE9s a\n--api-url / --api-key jelz\u0151k priorit\xE1st \xE9lveznek a f\xE1jllal szemben.\n\nMegjegyz\xE9s: az MCP szerver (haszno-mcp) is ebb\u0151l a f\xE1jlb\xF3l olvas,\nez\xE9rt elegend\u0151 egyszer futtatni a `haszno login` parancsot.\n"
+      "Az HASZNO_API_URL / HASZNO_API_KEY k\xF6rnyezeti v\xE1ltoz\xF3k \xE9s a\n--api-url / --api-key jelz\u0151k priorit\xE1st \xE9lveznek a f\xE1jllal szemben.\n\nMegjegyz\xE9s: az MCP szerver (haszno-mcp) is ebb\u0151l a f\xE1jlb\xF3l olvas,\nez\xE9rt elegend\u0151 egyszer futtatni a `haszno configure` parancsot.\n"
     );
   };
-  program2.command("login").description("Haszno API hiteles\xEDt\xE9si adatok ment\xE9se (~/.config/haszno/config.json)").option("--api-url <url>", "Haszno API alap URL-je").option("--api-key <key>", "Haszno API kulcs").action(loginAction);
-  program2.command("configure").description("API hiteles\xEDt\xE9si adatok ment\xE9se (alias: haszno login)").option("--api-url <url>", "Haszno API alap URL-je").option("--api-key <key>", "Haszno API kulcs").action(loginAction);
+  program2.command("configure").description("API kulcs k\xF6zvetlen ment\xE9se (haszno configure --api-key <kulcs>)").option("--api-url <url>", "Haszno API alap URL-je").option("--api-key <key>", "Haszno API kulcs").action(configureAction);
   const account = program2.command("account").description("Fi\xF3k \xE1llapot, be\xE1ll\xEDt\xE1sok \xE9s eg\xE9szs\xE9g / account health & settings");
   account.command("ping").description("API el\xE9rhet\u0151s\xE9g ellen\u0151rz\xE9se (exit 0 = ok, 1 = hiba)").action(async (_opts, cmd) => {
     try {
@@ -2627,6 +2882,629 @@ function registerBlogCommands(program2, client2) {
   });
 }
 
+// src/commands/shop.ts
+import { createInterface as createInterface4 } from "readline";
+function getJsonFlag2(cmd) {
+  try {
+    return cmd.optsWithGlobals().json === true;
+  } catch {
+    return false;
+  }
+}
+function fmt3(n) {
+  return n.toLocaleString("hu-HU") + " Ft";
+}
+function printAdTable(ads) {
+  if (ads.length === 0) {
+    process.stdout.write("Nincs tal\xE1lat.\n");
+    return;
+  }
+  for (const ad of ads) {
+    const status = ad.status === "aktiv" ? "akt\xEDv" : ad.status;
+    const reserved = ad.reserved ? " [foglalt]" : "";
+    process.stdout.write(
+      `  #${String(ad.id).padStart(5)}  ${fmt3(ad.priceGross).padStart(12)}  ${status.padEnd(10)}${reserved}  ${ad.title}
+`
+    );
+  }
+}
+function printReservation(r) {
+  const full = r;
+  process.stdout.write(`  Foglal\xE1s #${r.id}
+`);
+  if (full.ad) {
+    process.stdout.write(`    Hirdet\xE9s:  #${full.adId} ${full.ad.title}
+`);
+  } else {
+    process.stdout.write(`    Hirdet\xE9s:  #${r.adId}
+`);
+  }
+  process.stdout.write(`    \xC1llapot:   ${r.status}
+`);
+  if (r.heldUntil) {
+    process.stdout.write(`    Hat\xE1rid\u0151:  ${r.heldUntil}
+`);
+  }
+  if (full.message) {
+    process.stdout.write(`    \xDCzenet:    ${full.message}
+`);
+  }
+  if (full.offerPriceGross) {
+    process.stdout.write(`    Aj\xE1nlott \xE1r: ${fmt3(full.offerPriceGross)}
+`);
+  }
+  if (full.buyerPhone) {
+    process.stdout.write(`    Vev\u0151 tel.:  ${full.buyerPhone}
+`);
+  }
+  if (full.buyerEmail) {
+    process.stdout.write(`    Vev\u0151 e-mail: ${full.buyerEmail}
+`);
+  }
+  if (full.sellerPhone) {
+    process.stdout.write(`    Elad\xF3 tel.:  ${full.sellerPhone}
+`);
+  }
+  if (full.sellerEmail) {
+    process.stdout.write(`    Elad\xF3 e-mail: ${full.sellerEmail}
+`);
+  }
+  process.stdout.write(`    L\xE9trehozva: ${r.createdAt}
+`);
+}
+async function askConfirm4(message) {
+  if (!process.stdin.isTTY) return false;
+  const rl = createInterface4({ input: process.stdin, output: process.stderr });
+  return new Promise((resolve) => {
+    rl.question(`${message} [y/N] `, (ans) => {
+      rl.close();
+      resolve(ans.toLowerCase() === "y" || ans.toLowerCase() === "igen");
+    });
+  });
+}
+function parseAttrs(pairs) {
+  const result = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq < 1) {
+      process.stderr.write(`\xC9rv\xE9nytelen --attr \xE9rt\xE9k: "${pair}" (form\xE1tum: kulcs=\xE9rt\xE9k)
+`);
+      process.exit(2);
+    }
+    result[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return result;
+}
+function registerShopCommands(program2, shopClient2, _opts) {
+  const shop = program2.command("shop").description("Haszno Shop hirdet\xE9si piac");
+  shop.command("categories").description("Hirdet\xE9si kateg\xF3ri\xE1k \xE9s k\xF6telez\u0151 attrib\xFAtumok").action(async (_opts2, cmd) => {
+    try {
+      const cats = await shopClient2.categories.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(cats);
+      } else {
+        for (const cat of cats) {
+          process.stdout.write(`${cat.id}  ${cat.name}
+`);
+          for (const sub of cat.subcategories ?? []) {
+            const attrs = sub.requiredAttributes?.map((a) => a.key).join(", ") ?? "";
+            process.stdout.write(
+              `  \u2514\u2500 ${sub.id.padEnd(30)} ${sub.name}${attrs ? `  [k\xF6t.: ${attrs}]` : ""}
+`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("search [query]").description("Hirdet\xE9sek keres\xE9se").option("--category <id>", "Kateg\xF3ria sz\u0171r\u0151").option("--subcategory <id>", "Alkateg\xF3ria sz\u0171r\u0151").option("--min-price <Ft>", "Minimum \xE1r (brutt\xF3 Ft)").option("--max-price <Ft>", "Maximum \xE1r (brutt\xF3 Ft)").option("--county <megye>", "Megye sz\u0171r\u0151").option("--city <v\xE1ros>", "V\xE1ros sz\u0171r\u0151").option("--sort <m\xF3d>", "Rendez\xE9s: newest, price_asc, price_desc", "newest").option("--page <n>", "Oldalsz\xE1m", "1").action(
+    async (query, opts, cmd) => {
+      try {
+        const result = await shopClient2.ads.search({
+          q: query,
+          category: opts.category,
+          subcategory: opts.subcategory,
+          minPrice: opts.minPrice ? parseInt(opts.minPrice, 10) : void 0,
+          maxPrice: opts.maxPrice ? parseInt(opts.maxPrice, 10) : void 0,
+          county: opts.county,
+          city: opts.city,
+          sort: opts.sort,
+          page: opts.page ? parseInt(opts.page, 10) : void 0
+        });
+        if (getJsonFlag2(cmd)) {
+          printJson3(result);
+        } else {
+          const ads = Array.isArray(result) ? result : result.items ?? [];
+          printAdTable(ads);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("show <id>").description("Hirdet\xE9s r\xE9szletei").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.ads.get(id);
+      if (getJsonFlag2(cmd)) {
+        printJson3(ad);
+      } else {
+        process.stdout.write(`#${ad.id}  ${ad.title}
+`);
+        process.stdout.write(`  \xC1r:        ${fmt3(ad.priceGross)}${ad.negotiable ? " (alku)" : ""}
+`);
+        process.stdout.write(`  \xC1llapot:   ${ad.status}${ad.reserved ? " [foglalt]" : ""}
+`);
+        if (ad.condition) process.stdout.write(`  \xC1llapot:   ${ad.condition}
+`);
+        if (ad.county || ad.city) {
+          process.stdout.write(`  Helysz\xEDn:  ${[ad.county, ad.city].filter(Boolean).join(", ")}
+`);
+        }
+        if (ad.description) {
+          process.stdout.write(`  Le\xEDr\xE1s:
+${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
+`);
+        }
+        if (Object.keys(ad.attributes ?? {}).length > 0) {
+          process.stdout.write("  Attrib\xFAtumok:\n");
+          for (const [k, v] of Object.entries(ad.attributes)) {
+            process.stdout.write(`    ${k}: ${v}
+`);
+          }
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("price-hint").description("\xC1rjavaslat kateg\xF3ria alapj\xE1n").option("--category <id>", "Kateg\xF3ria").option("--subcategory <id>", "Alkateg\xF3ria").action(async (opts, cmd) => {
+    try {
+      const hint = await shopClient2.ads.priceHint({
+        categoryId: opts.category,
+        subcategoryId: opts.subcategory
+      });
+      if (getJsonFlag2(cmd)) {
+        printJson3(hint);
+      } else {
+        process.stdout.write("\xC1rjavaslat:\n");
+        if (hint.suggestedMin != null) {
+          process.stdout.write(`  Min: ${fmt3(hint.suggestedMin)}
+`);
+        }
+        if (hint.suggestedMid != null) {
+          process.stdout.write(`  K\xF6z\xE9p: ${fmt3(hint.suggestedMid)}
+`);
+        }
+        if (hint.suggestedMax != null) {
+          process.stdout.write(`  Max: ${fmt3(hint.suggestedMax)}
+`);
+        }
+        process.stdout.write(`  Mintaalap: ${hint.recentCount} hirdet\xE9s
+`);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("post").description("\xDAj hirdet\xE9s felad\xE1sa").option("--title <c\xEDm>", "Hirdet\xE9s c\xEDme").option("--category <id>", "Kateg\xF3ria").option("--subcategory <id>", "Alkateg\xF3ria").option("--price <Ft>", "V\xE9tel\xE1r (brutt\xF3 Ft)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "Term\xE9k \xE1llapota").option("--description <le\xEDr\xE1s>", "Hirdet\xE9s le\xEDr\xE1sa").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--image <f\xE1jl>", "K\xE9pf\xE1jl felt\xF6lt\xE9se (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--from-photos", "AI-javaslatot k\xE9r a felt\xF6lt\xF6tt k\xE9pek alapj\xE1n").option("--dry-run", "Csak megjelen\xEDti a k\xE9r\xE9st, nem k\xFCldi el").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
+    async (opts, cmd) => {
+      try {
+        let imageIds = [];
+        if (opts.image.length > 0) {
+          process.stderr.write(`${opts.image.length} k\xE9p felt\xF6lt\xE9se...
+`);
+          for (const filePath of opts.image) {
+            const result = await shopClient2.myAds.uploadImage(filePath);
+            imageIds.push(result.imageId);
+          }
+        }
+        let aiSuggest = {};
+        if (opts.fromPhotos && imageIds.length > 0) {
+          process.stderr.write("AI-javaslat k\xE9r\xE9se a k\xE9pekb\u0151l...\n");
+          aiSuggest = await shopClient2.myAds.fromPhotos(imageIds);
+          process.stdout.write("AI-javaslat:\n");
+          printJson3(aiSuggest);
+        }
+        const attrs = parseAttrs(opts.attr);
+        const body = {
+          title: opts.title ?? aiSuggest.title ?? "",
+          categoryId: opts.category ?? aiSuggest.categoryId,
+          subcategoryId: opts.subcategory ?? aiSuggest.subcategoryId,
+          priceGross: opts.price != null ? parseInt(opts.price, 10) : aiSuggest.suggestedPriceGross ?? 0,
+          negotiable: opts.negotiable ?? false,
+          condition: opts.condition ?? aiSuggest.condition,
+          description: opts.description ?? aiSuggest.description,
+          county: opts.county,
+          city: opts.city,
+          attributes: { ...aiSuggest.attributes, ...attrs },
+          imageIds,
+          contactName: opts.contactName,
+          contactPhone: opts.contactPhone,
+          showPhone: opts.showPhone ?? false
+        };
+        if (!body.title) {
+          process.stderr.write("A --title megad\xE1sa k\xF6telez\u0151 (vagy --from-photos az AI-javaslathoz).\n");
+          process.exit(2);
+          return;
+        }
+        if (opts.dryRun) {
+          process.stdout.write("K\xE9r\xE9s (dry-run, NEM LETT ELK\xDCLDVE):\n");
+          printJson3(body);
+          return;
+        }
+        if (opts.fromPhotos && !opts.yes) {
+          process.stdout.write("Hirdet\xE9s tervezett adatai:\n");
+          printJson3(body);
+          const ok = await askConfirm4("Feladjuk \xEDgy?");
+          if (!ok) {
+            process.stdout.write("Megszak\xEDtva.\n");
+            process.exit(0);
+            return;
+          }
+        }
+        const ad = await shopClient2.myAds.post(body);
+        if (getJsonFlag2(cmd)) {
+          printJson3(ad);
+        } else {
+          process.stdout.write(`Hirdet\xE9s feladva: #${ad.id}  ${ad.title}
+`);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("my").description("Saj\xE1t hirdet\xE9sek list\xE1ja").action(async (_opts2, cmd) => {
+    try {
+      const ads = await shopClient2.myAds.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(ads);
+      } else {
+        printAdTable(Array.isArray(ads) ? ads : []);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("edit <id>").description("Hirdet\xE9s szerkeszt\xE9se").option("--title <c\xEDm>", "\xDAj c\xEDm").option("--price <Ft>", "\xDAj \xE1r (brutt\xF3 Ft)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "Term\xE9k \xE1llapota").option("--description <le\xEDr\xE1s>", "Le\xEDr\xE1s").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum", (v, a) => [...a, v], []).option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").action(
+    async (idStr, opts, cmd) => {
+      const id = parseInt(idStr, 10);
+      if (isNaN(id)) {
+        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        process.exit(2);
+        return;
+      }
+      try {
+        const attrs = parseAttrs(opts.attr);
+        const body = {};
+        if (opts.title) body.title = opts.title;
+        if (opts.price) body.priceGross = parseInt(opts.price, 10);
+        if (opts.negotiable !== void 0) body.negotiable = opts.negotiable;
+        if (opts.condition) body.condition = opts.condition;
+        if (opts.description) body.description = opts.description;
+        if (opts.county) body.county = opts.county;
+        if (opts.city) body.city = opts.city;
+        if (Object.keys(attrs).length > 0) body.attributes = attrs;
+        if (opts.contactName) body.contactName = opts.contactName;
+        if (opts.contactPhone) body.contactPhone = opts.contactPhone;
+        if (opts.showPhone !== void 0) body.showPhone = opts.showPhone;
+        const ad = await shopClient2.myAds.edit(id, body);
+        if (getJsonFlag2(cmd)) {
+          printJson3(ad);
+        } else {
+          process.stdout.write(`Hirdet\xE9s #${ad.id} friss\xEDtve.
+`);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("pause <id>").description("Hirdet\xE9s sz\xFCneteltet\xE9se").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.myAds.pause(id);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} sz\xFCneteltetve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("activate <id>").description("Hirdet\xE9s aktiv\xE1l\xE1sa").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.myAds.activate(id);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} aktiv\xE1lva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("sold <id>").description("Hirdet\xE9s eladottnak jel\xF6l\xE9se").option("--price <Ft>", "T\xE9nyleges elad\xE1si \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const body = opts.price ? { soldPriceGross: parseInt(opts.price, 10) } : {};
+      const ad = await shopClient2.myAds.sold(id, body);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} eladottnak jel\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("renew <id>").description("Hirdet\xE9s meg\xFAj\xEDt\xE1sa").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.myAds.renew(id);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} meg\xFAj\xEDtva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("delete <id>").description("Hirdet\xE9s t\xF6rl\xE9se").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.myAds.delete(id);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${id} t\xF6r\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("inquiries").description("Be\xE9rkezett \xFCzenetek list\xE1ja").action(async (_opts2, cmd) => {
+    try {
+      const items = await shopClient2.inquiries.listReceived();
+      if (getJsonFlag2(cmd)) {
+        printJson3(items);
+      } else {
+        if (!Array.isArray(items) || items.length === 0) {
+          process.stdout.write("Nincs be\xE9rkezett \xFCzenet.\n");
+          return;
+        }
+        for (const item of items) {
+          const read = item.readAt ? "" : " [\xFAj]";
+          process.stdout.write(`  #${item.id}${read}  Hirdet\xE9s #${item.adId}  ${item.senderName}
+`);
+          process.stdout.write(`    ${item.message.slice(0, 80)}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("inquire <adId>").description("\xDCzenet k\xFCld\xE9se elad\xF3nak").option("--message <sz\xF6veg>", "\xDCzenet sz\xF6vege").action(async (adIdStr, opts, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.message) {
+      process.stderr.write("--message megad\xE1sa k\xF6telez\u0151.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.inquiries.send(adId, { message: opts.message });
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write("\xDCzenet elk\xFCldve.\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("favorite <adId>").description("Hirdet\xE9s ment\xE9se kedvencekbe").action(async (adIdStr, _opts2, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.favorites.add(adId);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${adId} hozz\xE1adva a kedvencekhez.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("unfavorite <adId>").description("Hirdet\xE9s elt\xE1vol\xEDt\xE1sa kedvencekb\u0151l").action(async (adIdStr, _opts2, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.favorites.remove(adId);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${adId} elt\xE1vol\xEDtva a kedvencekb\u0151l.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("favorites").description("Kedvenc hirdet\xE9sek list\xE1ja").action(async (_opts2, cmd) => {
+    try {
+      const ads = await shopClient2.favorites.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(ads);
+      } else {
+        printAdTable(Array.isArray(ads) ? ads : []);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("reserve <adId>").description("Hirdet\xE9s lefoglal\xE1sa (ingyenes \u2014 a fizet\xE9s k\xF6zvetlen\xFCl az elad\xF3val zajlik)").option("--message <sz\xF6veg>", "\xDCzenet az elad\xF3nak (max. 1000 karakter)").option("--offer <Ft>", "Aj\xE1nlott \xE1r (brutt\xF3 Ft, ellenjavaslat)").option("--phone <telefon>", "Telefonsz\xE1m (az elad\xF3nak \xE1tadva elfogad\xE1skor, max. 50 kar.)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
+    async (adIdStr, opts, cmd) => {
+      const adId = parseInt(adIdStr, 10);
+      if (isNaN(adId)) {
+        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        process.exit(2);
+        return;
+      }
+      if (!opts.yes) {
+        process.stdout.write(
+          "A foglal\xE1s INGYENES \u2014 a fizet\xE9s \xE9s az \xE1tad\xE1s k\xF6zvetlen\xFCl az elad\xF3val t\xF6rt\xE9nik.\n"
+        );
+        const ok = await askConfirm4(`Lefoglalod a #${adId} hirdet\xE9st?`);
+        if (!ok) {
+          process.stdout.write("Megszak\xEDtva.\n");
+          process.exit(0);
+          return;
+        }
+      }
+      try {
+        const body = {};
+        if (opts.message) body.message = opts.message;
+        if (opts.offer) body.offerPriceGross = parseInt(opts.offer, 10);
+        if (opts.phone) body.phone = opts.phone;
+        const { reservation: reservation2 } = await shopClient2.reservations.create(adId, body);
+        if (getJsonFlag2(cmd)) {
+          printJson3(reservation2);
+        } else {
+          process.stdout.write("Foglal\xE1s l\xE9trehozva:\n");
+          printReservation(reservation2);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("reservations").description("Foglal\xE1saim list\xE1ja").option("--as <buyer|seller>", "Szerep: buyer (vev\u0151, alap\xE9rt.) vagy seller (elad\xF3)", "buyer").option("--status <\xE1llapot>", "\xC1llapot sz\u0171r\u0151").option("--page <n>", "Oldalsz\xE1m", "1").action(
+    async (opts, cmd) => {
+      try {
+        const result = await shopClient2.reservations.list({
+          role: opts.as ?? "buyer",
+          status: opts.status,
+          page: opts.page ? parseInt(opts.page, 10) : void 0
+        });
+        if (getJsonFlag2(cmd)) {
+          printJson3(result);
+        } else {
+          const items = result.items ?? [];
+          if (items.length === 0) {
+            process.stdout.write("Nincs foglal\xE1s.\n");
+            return;
+          }
+          for (const r of items) {
+            printReservation(r);
+            process.stdout.write("\n");
+          }
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  const reservation = shop.command("reservation").description("Foglal\xE1s kezel\xE9se (elfogad / elutas\xEDt / lemond / teljes\xEDt)");
+  reservation.command("accept <id>").description("Foglal\xE1s elfogad\xE1sa (elad\xF3k\xE9nt)").option("--held-until <ISO>", "Hat\xE1rid\u0151 a vev\u0151nek (ISO-8601 d\xE1tum/id\u0151)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.accept(id, { heldUntil: opts.heldUntil });
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} elfogadva (\xE1llapot: ${r.status}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("decline <id>").description("Foglal\xE1s elutas\xEDt\xE1sa (elad\xF3k\xE9nt)").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.decline(id);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} elutas\xEDtva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("cancel <id>").description("Foglal\xE1s lemond\xE1sa (vev\u0151k\xE9nt)").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.cancel(id);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} lemondva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("complete <id>").description("Foglal\xE1s teljes\xEDt\xE9se (elad\xF3k\xE9nt)").option("--price <Ft>", "T\xE9nyleges elad\xE1si \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const body = opts.price ? { soldPriceGross: parseInt(opts.price, 10) } : {};
+      const { reservation: r } = await shopClient2.reservations.complete(id, body);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} teljes\xEDtve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+}
+
 // src/index.ts
 var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.1.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
 function buildClient(opts) {
@@ -2643,7 +3521,9 @@ function argvFlag(name) {
   }
   return void 0;
 }
-var client = buildClient({ apiUrl: argvFlag("--api-url"), apiKey: argvFlag("--api-key") });
+var sharedOpts = { baseUrl: argvFlag("--api-url"), apiKey: argvFlag("--api-key") };
+var client = buildClient(sharedOpts);
+var shopClient = createShopClient(sharedOpts);
 registerCatalogCommands(program, client);
 registerProductsCommands(program, client);
 registerProposalsCommands(program, client);
@@ -2655,5 +3535,6 @@ registerAccountCommands(program, client);
 registerCatalogueCommands(program, client);
 registerPeersCommands(program, client);
 registerBlogCommands(program, client);
+registerShopCommands(program, shopClient);
 program.parse();
 //# sourceMappingURL=index.js.map
