@@ -786,7 +786,7 @@ export function registerShopCommands(
       try {
         const { reservation: r } = await shopClient.reservations.cancel(id)
         if (getJsonFlag(cmd)) printJson(r)
-        else process.stdout.write(`Foglalás #${id} lemondva.\n`)
+        else process.stdout.write(`Foglalás #${id} visszavonva.\n`)
       } catch (err) { handleError(err) }
     })
 

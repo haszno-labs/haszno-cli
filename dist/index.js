@@ -3480,7 +3480,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
     try {
       const { reservation: r } = await shopClient2.reservations.cancel(id);
       if (getJsonFlag2(cmd)) printJson3(r);
-      else process.stdout.write(`Foglal\xE1s #${id} lemondva.
+      else process.stdout.write(`Foglal\xE1s #${id} visszavonva.
 `);
     } catch (err) {
       handleError2(err);

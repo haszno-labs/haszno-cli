@@ -515,7 +515,7 @@ describe('haszno shop reservation sub-commands', () => {
   })
 
   it('cancel calls POST /api/v1/shop/my/reservations/:id/cancel', async () => {
-    const { fn, calls } = makeFetch(200, { reservation: { ...simple, status: 'lemondva' } })
+    const { fn, calls } = makeFetch(200, { reservation: { ...simple, status: 'visszavonva' } })
     const sc = createShopClient({ baseUrl: BASE, apiKey: TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     const cap = captureOutput()
     try {

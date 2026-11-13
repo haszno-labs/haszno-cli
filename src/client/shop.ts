@@ -90,7 +90,7 @@ export interface ShopReservation {
   id: number
   adId: number
   ad: ShopReservationAd
-  status: 'fuggoben' | 'elfogadva' | 'elutasitva' | 'lemondva' | 'teljesitve' | 'lejart' | string
+  status: 'fuggoben' | 'elfogadva' | 'elutasitva' | 'visszavonva' | 'teljesitve' | 'lejart' | string
   message: string | null
   offerPriceGross: number | null
   buyerName: string
