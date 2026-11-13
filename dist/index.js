@@ -3140,7 +3140,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
           printJson3(body);
           return;
         }
-        if (opts.fromPhotos && !opts.yes) {
+        if (!opts.yes) {
           process.stdout.write("Hirdet\xE9s tervezett adatai:\n");
           printJson3(body);
           const ok = await askConfirm4("Feladjuk \xEDgy?");

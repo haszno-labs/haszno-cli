@@ -400,7 +400,11 @@ export function registerShopCommands(
             return
           }
 
-          if (opts.fromPhotos && !opts.yes) {
+          // Confirmation gate fires whenever --yes is absent, regardless of
+          // whether --from-photos was provided. The dry-run preview already
+          // printed the body above; for the non-dry-run path we print it here
+          // so the user sees what will be posted before confirming.
+          if (!opts.yes) {
             process.stdout.write('Hirdetés tervezett adatai:\n')
             printJson(body)
             const ok = await askConfirm('Feladjuk így?')
