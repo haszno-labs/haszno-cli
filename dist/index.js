@@ -1,163 +1,20 @@
 #!/usr/bin/env node
+import {
+  CONFIG_PATH,
+  HasznoApiError,
+  del,
+  get,
+  isShopToken,
+  patch,
+  post,
+  put,
+  readConfigFile,
+  readConfigObject,
+  resolveConnection
+} from "./chunk-QXN2O5TR.js";
 
 // src/index.ts
 import { Command as Command2 } from "commander";
-
-// src/client/error.ts
-var HasznoApiError = class extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-    this.name = "HasznoApiError";
-  }
-  status;
-};
-
-// src/client/config.ts
-import { existsSync, readFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-var CONFIG_PATH = join(homedir(), ".config", "haszno", "config.json");
-var LEGACY_CONFIG_PATH = join(homedir(), ".config", "arfutar", "config.json");
-var DEFAULT_API_URL = "https://haszno.com";
-function parseConfig(raw) {
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-  const src = parsed;
-  const out = {};
-  for (const key of ["apiUrl", "apiKey", "basicAuth"]) {
-    if (typeof src[key] === "string") out[key] = src[key];
-  }
-  return out;
-}
-function readConfigObject(configPath = CONFIG_PATH) {
-  try {
-    if (existsSync(configPath)) {
-      const parsed = JSON.parse(readFileSync(configPath, "utf-8"));
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
-    }
-  } catch {
-  }
-  return {};
-}
-function readConfigFile(configPath = CONFIG_PATH) {
-  try {
-    if (existsSync(configPath)) return parseConfig(readFileSync(configPath, "utf-8"));
-  } catch {
-  }
-  if (configPath === CONFIG_PATH) {
-    try {
-      if (existsSync(LEGACY_CONFIG_PATH)) return parseConfig(readFileSync(LEGACY_CONFIG_PATH, "utf-8"));
-    } catch {
-    }
-  }
-  return {};
-}
-var normalizeUrl = (url) => url.replace(/\/+$/, "");
-var nonEmpty = (v) => v ? v : void 0;
-function resolveConnection(opts = {}, env = process.env, readConfig = readConfigFile) {
-  let apiKey = nonEmpty(opts.apiKey) ?? nonEmpty(env["HASZNO_API_TOKEN"]) ?? nonEmpty(env["HASZNO_API_KEY"]) ?? nonEmpty(env["ARFUTAR_API_KEY"]);
-  let basicAuth = nonEmpty(opts.basicAuth) ?? nonEmpty(env["HASZNO_BASIC"]) ?? nonEmpty(env["ARFUTAR_BASIC"]);
-  let baseUrl = nonEmpty(opts.baseUrl) ?? nonEmpty(env["HASZNO_API_URL"]) ?? nonEmpty(env["ARFUTAR_API_URL"]);
-  if (!apiKey && !basicAuth) {
-    const config = readConfig();
-    const configUrl = normalizeUrl(nonEmpty(config.apiUrl) ?? DEFAULT_API_URL);
-    baseUrl ??= nonEmpty(config.apiUrl);
-    if (normalizeUrl(baseUrl ?? DEFAULT_API_URL) === configUrl) {
-      apiKey = nonEmpty(config.apiKey);
-      basicAuth = nonEmpty(config.basicAuth);
-    }
-  }
-  return { baseUrl: normalizeUrl(baseUrl ?? DEFAULT_API_URL), apiKey, basicAuth };
-}
-
-// src/client/http.ts
-var SHOP_TOKEN_PREFIX = "haszno_";
-function isShopToken(key) {
-  return !!key?.startsWith(SHOP_TOKEN_PREFIX);
-}
-var CLI_VERSION = "0.1.0";
-function buildAuthHeader(conn) {
-  if (conn.apiKey) {
-    if (isShopToken(conn.apiKey)) return { Authorization: `Bearer ${conn.apiKey}` };
-    return { "x-api-key": conn.apiKey };
-  }
-  if (conn.basicAuth) {
-    const encoded = Buffer.from(conn.basicAuth).toString("base64");
-    return { Authorization: `Basic ${encoded}` };
-  }
-  return {};
-}
-async function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-async function request(method, path, body, opts) {
-  const conn = resolveConnection(opts, process.env, opts.readConfig);
-  const url = `${conn.baseUrl}${path}`;
-  const fetchFn = opts.fetch ?? fetch;
-  const maxRetries = opts.maxRetries ?? 3;
-  const retryDelayMs = opts.retryDelayMs ?? 500;
-  const timeoutMs = opts.timeoutMs ?? 3e4;
-  const headers = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-    "User-Agent": `haszno-cli/${CLI_VERSION}`,
-    ...buildAuthHeader(conn)
-  };
-  let lastError;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    if (attempt > 0) await sleep(retryDelayMs * Math.pow(2, attempt - 1));
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response;
-    try {
-      response = await fetchFn(url, {
-        method,
-        headers,
-        body: body !== void 0 ? JSON.stringify(body) : void 0,
-        signal: controller.signal
-      });
-    } catch (err) {
-      lastError = err;
-      continue;
-    } finally {
-      clearTimeout(timer);
-    }
-    if ((response.status === 429 || response.status >= 500) && attempt < maxRetries - 1) {
-      lastError = new HasznoApiError(response.status, `HTTP ${response.status}`);
-      continue;
-    }
-    if (!response.ok) {
-      let message = `HTTP ${response.status}`;
-      try {
-        const json = await response.json();
-        if (json.error) message = json.error;
-      } catch {
-      }
-      throw new HasznoApiError(response.status, message);
-    }
-    const text = await response.text();
-    if (!text) return void 0;
-    return JSON.parse(text);
-  }
-  if (lastError instanceof HasznoApiError) throw lastError;
-  throw new Error(`Network error after ${maxRetries} attempts: ${String(lastError)}`);
-}
-function get(path, opts) {
-  return request("GET", path, void 0, opts);
-}
-function post(path, body, opts) {
-  return request("POST", path, body, opts);
-}
-function put(path, body, opts) {
-  return request("PUT", path, body, opts);
-}
-function patch(path, body, opts) {
-  return request("PATCH", path, body, opts);
-}
-function del(path, opts) {
-  return request("DELETE", path, void 0, opts);
-}
 
 // src/client/index.ts
 var ShopTokenNotSupportedError = class extends Error {
@@ -171,9 +28,25 @@ var ShopTokenNotSupportedError = class extends Error {
     this.operation = operation;
   }
 };
+var LegacyKeyNotSupportedError = class extends Error {
+  isLegacyKeyNotSupported = true;
+  operation;
+  constructor(operation) {
+    super(
+      `"${operation}" csak bolt API-tokennel (haszno_\u2026) \xE9rhet\u0151 el \u2014 a Napi jelent\xE9s \xE9s agent-parancsok nem m\u0171k\xF6dnek sima API-kulccsal. Hozzon l\xE9tre bolt API-tokent itt: /app/api-kulcsok (Haszno webalkalmaz\xE1s). Shop token required: create one at /app/api-kulcsok in the Haszno web app.`
+    );
+    this.name = "LegacyKeyNotSupportedError";
+    this.operation = operation;
+  }
+};
 function notSupported(op) {
   return (..._args) => {
     return Promise.reject(new ShopTokenNotSupportedError(op));
+  };
+}
+function notSupportedLegacy(op) {
+  return (..._args) => {
+    return Promise.reject(new LegacyKeyNotSupportedError(op));
   };
 }
 function createClient(opts = {}) {
@@ -291,8 +164,7 @@ function createShopTokenClient(opts) {
         const suffix = qs.toString() ? `?${qs.toString()}` : "";
         return get(`/api/agent/actions${suffix}`, o);
       },
-      proposeAction: (body) => post("/api/agent/actions", body, o),
-      getAutopilot: () => get("/api/agent/autopilot", o)
+      proposeAction: (body) => post("/api/agent/actions", body, o)
     }
   };
 }
@@ -442,23 +314,17 @@ function createLegacyClient(opts) {
       },
       get: (slug) => get(`/api/blog/${slug}`, o)
     },
+    // manager.* requires a shop token (haszno_…). In legacy mode these endpoints
+    // either return synthetic demo data (GET /api/agent/actions → HTTP 200 with
+    // fake rows) or 401. Both outcomes are wrong for a production agent.
     manager: {
-      listReports: () => get("/api/daily-reports", o),
-      // Agent-facing routes under /api/agent/ — Bearer tokens bypass the outer Basic-auth
-      // gate on Vercel and authenticate via the per-shop token handler (PR #108 on main).
-      getLatestReport: () => get("/api/agent/daily-report", o),
-      getReport: (day) => get(`/api/agent/daily-report/${day}`, o),
-      getResearchBrief: () => get("/api/agent/research-brief", o),
-      postFindings: (day, body) => post(`/api/agent/daily-report/${day}/findings`, body, o),
-      listActions: (params) => {
-        const qs = new URLSearchParams();
-        if (params?.status) qs.set("status", params.status);
-        if (params?.limit != null) qs.set("limit", String(params.limit));
-        const suffix = qs.toString() ? `?${qs.toString()}` : "";
-        return get(`/api/agent/actions${suffix}`, o);
-      },
-      proposeAction: (body) => post("/api/agent/actions", body, o),
-      getAutopilot: () => get("/api/agent/autopilot", o)
+      listReports: notSupportedLegacy("manager.listReports"),
+      getLatestReport: notSupportedLegacy("manager.getLatestReport"),
+      getReport: notSupportedLegacy("manager.getReport"),
+      getResearchBrief: notSupportedLegacy("manager.getResearchBrief"),
+      postFindings: notSupportedLegacy("manager.postFindings"),
+      listActions: notSupportedLegacy("manager.listActions"),
+      proposeAction: notSupportedLegacy("manager.proposeAction")
     }
   };
 }
@@ -1489,8 +1355,8 @@ Rendel\xE9s #${o.id}`);
 }
 async function interactiveConfirm(question) {
   if (!process.stdin.isTTY) return false;
-  const { createInterface: createInterface4 } = await import("readline");
-  const rl = createInterface4({ input: process.stdin, output: process.stdout });
+  const { createInterface: createInterface5 } = await import("readline");
+  const rl = createInterface5({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(`${question} [i/n] `, (answer) => {
       rl.close();
@@ -1970,6 +1836,209 @@ function registerFeedsCommands(program2, client2) {
 import { writeFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import { createInterface as createInterface3 } from "readline";
+
+// src/client/shop.ts
+import { readFileSync } from "fs";
+var CLI_VERSION = "0.3.0";
+async function uploadShopImage(filePath, opts) {
+  const conn = resolveConnection(opts, process.env, opts.readConfig);
+  const fetchFn = opts.fetch ?? fetch;
+  const fileContent = readFileSync(filePath);
+  let contentType = "image/jpeg";
+  if (fileContent[0] === 137 && fileContent[1] === 80) contentType = "image/png";
+  else if (fileContent[0] === 71 && fileContent[1] === 73) contentType = "image/gif";
+  else if (fileContent[0] === 82 && fileContent[1] === 73 && fileContent[8] === 87) contentType = "image/webp";
+  const headers = {
+    "Content-Type": contentType,
+    "User-Agent": `haszno-cli/${CLI_VERSION}`,
+    Accept: "application/json"
+  };
+  if (conn.apiKey) {
+    if (isShopToken(conn.apiKey)) {
+      headers["Authorization"] = `Bearer ${conn.apiKey}`;
+    } else {
+      headers["x-api-key"] = conn.apiKey;
+    }
+  }
+  if (conn.basicAuth) {
+    headers["Authorization"] = `Basic ${Buffer.from(conn.basicAuth).toString("base64")}`;
+  }
+  const url = `${conn.baseUrl}/api/v1/shop/images`;
+  const response = await fetchFn(url, { method: "POST", headers, body: fileContent });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const json = await response.json();
+      if (json.error) message = json.error;
+    } catch {
+    }
+    throw new HasznoApiError(response.status, message);
+  }
+  return response.json();
+}
+async function cliLogin(body, opts) {
+  const conn = resolveConnection({ baseUrl: opts.baseUrl }, process.env, () => ({}));
+  const fetchFn = opts.fetch ?? fetch;
+  const url = `${conn.baseUrl}/api/v1/auth/cli-login`;
+  const response = await fetchFn(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": `haszno-cli/${CLI_VERSION}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const json = await response.json();
+      if (json.error) message = json.error;
+    } catch {
+    }
+    throw new HasznoApiError(response.status, message);
+  }
+  return response.json();
+}
+var SORT_MAP = {
+  newest: "uj",
+  price_asc: "ar_nov",
+  price_desc: "ar_csokk"
+};
+function createShopClient(opts) {
+  const o = opts;
+  return {
+    categories: {
+      list: async () => {
+        const taxonomy = await get("/api/v1/shop/taxonomy", o);
+        return taxonomy.categories;
+      }
+    },
+    ads: {
+      search: (params = {}) => {
+        const qs = new URLSearchParams();
+        if (params.q) qs.set("q", params.q);
+        if (params.category) qs.set("cat", params.category);
+        if (params.subcategory) qs.set("sub", params.subcategory);
+        if (params.minPrice != null) qs.set("min", String(params.minPrice));
+        if (params.maxPrice != null) qs.set("max", String(params.maxPrice));
+        if (params.condition) qs.set("cond", params.condition);
+        if (params.county) qs.set("county", params.county);
+        if (params.city) qs.set("city", params.city);
+        if (params.sort) qs.set("sort", SORT_MAP[params.sort] ?? params.sort);
+        if (params.page != null) qs.set("page", String(params.page));
+        const suffix = qs.toString() ? `?${qs.toString()}` : "";
+        return get(`/api/v1/shop/ads${suffix}`, o);
+      },
+      get: (id) => get(`/api/v1/shop/ads/${id}`, o),
+      priceHint: async (params = {}) => {
+        const qs = new URLSearchParams();
+        if (params.category) qs.set("cat", params.category);
+        if (params.subcategory) qs.set("sub", params.subcategory);
+        const suffix = qs.toString() ? `?${qs.toString()}` : "";
+        return get(`/api/v1/shop/assist/price-hint${suffix}`, o);
+      }
+    },
+    myAds: {
+      list: () => get("/api/v1/shop/my/ads", o),
+      post: (body) => post("/api/v1/shop/ads", body, o),
+      edit: async (id, partial) => {
+        const existing = await get(`/api/v1/shop/my/ads/${id}`, o);
+        const merged = {
+          category: existing.category,
+          subcategory: existing.subcategory ?? null,
+          title: existing.title,
+          description: existing.description ?? "",
+          priceGross: existing.priceGross,
+          negotiable: existing.negotiable,
+          condition: existing.condition,
+          county: existing.county,
+          city: existing.city,
+          images: existing.images,
+          attrs: existing.attrs,
+          contactName: existing.contactName ?? "",
+          contactPhone: existing.contactPhone ?? null,
+          contactEmail: existing.contactEmail,
+          showPhone: existing.showPhone,
+          resellable: existing.resellable,
+          partnerCommissionPct: existing.partnerCommissionPct,
+          ...partial
+        };
+        return put(`/api/v1/shop/ads/${id}`, merged, o);
+      },
+      pause: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: "szunetel" }, o),
+      activate: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: "aktiv" }, o),
+      sold: (id, body = {}) => post(`/api/v1/shop/ads/${id}/sold`, body, o),
+      renew: (id) => post(`/api/v1/shop/ads/${id}/renew`, null, o),
+      delete: (id) => post(`/api/v1/shop/ads/${id}/status`, { status: "torolve" }, o),
+      uploadImage: (filePath) => uploadShopImage(filePath, o),
+      fromPhotos: (imageIds) => post("/api/v1/shop/assist/from-photos", { imageIds }, o)
+    },
+    inquiries: {
+      listReceived: async () => {
+        const result = await get("/api/v1/shop/my/inquiries", o);
+        return result.items;
+      },
+      send: (adId, body) => post(`/api/v1/shop/ads/${adId}/inquiries`, body, o),
+      reply: (id, message) => post(`/api/v1/shop/my/inquiries/${id}/reply`, { message }, o)
+    },
+    favorites: {
+      list: () => get("/api/v1/shop/my/favorites", o),
+      add: (adId) => put(`/api/v1/shop/ads/${adId}/favorite`, null, o),
+      remove: (adId) => del(`/api/v1/shop/ads/${adId}/favorite`, o)
+    },
+    reservations: {
+      create: (adId, body) => post(`/api/v1/shop/ads/${adId}/reservations`, body, o),
+      list: (params = {}) => {
+        const qs = new URLSearchParams();
+        qs.set("role", params.role ?? "buyer");
+        if (params.status) qs.set("status", params.status);
+        if (params.page != null) qs.set("page", String(params.page));
+        return get(`/api/v1/shop/my/reservations?${qs.toString()}`, o);
+      },
+      accept: (id, body = {}) => post(`/api/v1/shop/my/reservations/${id}/accept`, body, o),
+      decline: (id) => post(`/api/v1/shop/my/reservations/${id}/decline`, null, o),
+      cancel: (id) => post(`/api/v1/shop/my/reservations/${id}/cancel`, null, o),
+      complete: (id, body = {}) => post(`/api/v1/shop/my/reservations/${id}/complete`, body, o),
+      counter: (id, priceGross) => post(`/api/v1/shop/my/reservations/${id}/counter`, { priceGross }, o),
+      acceptCounter: (id) => post(`/api/v1/shop/my/reservations/${id}/accept-counter`, {}, o),
+      messages: (id) => get(`/api/v1/shop/my/reservations/${id}/messages`, o),
+      message: (id, body) => post(`/api/v1/shop/my/reservations/${id}/messages`, { body }, o),
+      review: (id, rating, comment) => post(`/api/v1/shop/my/reservations/${id}/review`, { rating, ...comment !== void 0 ? { comment } : {} }, o)
+    },
+    savedSearches: {
+      list: () => get("/api/v1/shop/my/saved-searches", o),
+      add: (params) => post("/api/v1/shop/my/saved-searches", params, o),
+      remove: (id) => del(`/api/v1/shop/my/saved-searches/${id}`, o)
+    },
+    watch: {
+      watch: (adId) => put(`/api/v1/shop/ads/${adId}/watch`, null, o),
+      unwatch: (adId) => del(`/api/v1/shop/ads/${adId}/watch`, o)
+    },
+    urlImport: {
+      importUrl: (url) => post("/api/v1/shop/assist/url-import", { url }, o)
+    },
+    draft: {
+      show: () => get("/api/v1/shop/my/draft", o),
+      save: (payload) => put("/api/v1/shop/my/draft", payload, o),
+      clear: () => del("/api/v1/shop/my/draft", o)
+    },
+    images: {
+      removeBg: (id) => post(`/api/v1/shop/images/${id}/remove-bg`, {}, o)
+    },
+    tokens: {
+      list: () => get("/api/v1/auth/tokens", o),
+      revoke: (id) => del(`/api/v1/auth/tokens/${id}`, o),
+      revokeCurrent: () => post("/api/v1/auth/tokens/revoke-current", {}, o)
+    },
+    sellerProfile: {
+      get: () => get("/api/v1/shop/my/seller-profile", o),
+      set: (body) => put("/api/v1/shop/my/seller-profile", body, o)
+    }
+  };
+}
+
+// src/commands/account.ts
 function writeConfigFile(config, configPath = CONFIG_PATH) {
   const dir = dirname(configPath);
   mkdirSync(dir, { recursive: true, mode: 448 });
@@ -2024,8 +2093,144 @@ async function askInput(message) {
     });
   });
 }
-function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH } = {}) {
-  const loginAction = async (opts, cmd) => {
+async function readPasswordNoEcho(prompt) {
+  if (!process.stdin.isTTY) {
+    const rl = createInterface3({ input: process.stdin });
+    return new Promise((resolve) => {
+      rl.once("line", (line) => {
+        rl.close();
+        resolve(line.trim());
+      });
+    });
+  }
+  process.stderr.write(prompt);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  return new Promise((resolve) => {
+    const chars = [];
+    const onData = (buf) => {
+      const ch = buf.toString();
+      if (ch === "\r" || ch === "\n") {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener("data", onData);
+        process.stderr.write("\n");
+        resolve(chars.join(""));
+      } else if (ch === "") {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.exit(1);
+      } else if (ch === "\x7F" || ch === "\b") {
+        chars.pop();
+      } else {
+        chars.push(ch);
+      }
+    };
+    process.stdin.on("data", onData);
+  });
+}
+function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH, httpOpts = {} } = {}) {
+  program2.command("login").description("Bejelentkez\xE9s e-mail/jelsz\xF3val; az API-token elment\xE9se (~/.config/haszno/config.json)").option("--api-url <url>", "Haszno API alap URL-je (env: HASZNO_API_URL)").option("--label <name>", 'Token neve (alap\xE9rt.: "CLI")', "CLI").option("--show-token", "Token megjelen\xEDt\xE9se ment\xE9s ut\xE1n").action(
+    async (opts, cmd) => {
+      const globals = cmd?.optsWithGlobals() ?? {};
+      const apiUrl = opts.apiUrl ?? globals.apiUrl ?? (process.env["HASZNO_API_URL"] || void 0);
+      let email = process.env["HASZNO_EMAIL"] ?? "";
+      let password = process.env["HASZNO_PASSWORD"] ?? "";
+      if (!email || !password) {
+        if (!process.stdin.isTTY) {
+          process.stderr.write(
+            "Interakt\xEDv m\xF3d TTY n\xE9lk\xFCl nem el\xE9rhet\u0151. \xC1ll\xEDtsd be a HASZNO_EMAIL \xE9s HASZNO_PASSWORD v\xE1ltoz\xF3kat.\n"
+          );
+          process.exit(2);
+          return;
+        }
+        process.stdout.write("Haszno bejelentkez\xE9s\n");
+        if (!email) email = await askInput("E-mail c\xEDm: ");
+        if (!password) password = await readPasswordNoEcho("Jelsz\xF3: ");
+      }
+      try {
+        const loginOpts = { ...httpOpts, baseUrl: apiUrl };
+        const result = await cliLogin(
+          { email, password, label: opts.label ?? "CLI" },
+          loginOpts
+        );
+        const existing = {
+          ...readConfigFile(configPath),
+          ...readConfigObject(configPath)
+        };
+        existing.apiKey = result.token;
+        if (apiUrl) existing.apiUrl = apiUrl;
+        existing["userEmail"] = result.user.email;
+        existing["userName"] = result.user.name;
+        existing["shopName"] = result.user.shopName;
+        writeConfigFile(existing, configPath);
+        process.stdout.write(
+          `Bejelentkezve: ${result.user.name} <${result.user.email}>${result.user.shopName ? ` (${result.user.shopName})` : ""}
+Token elmentve: ${configPath}
+`
+        );
+        if (opts.showToken) {
+          process.stdout.write(`Token: ${result.token}
+`);
+        }
+        process.stdout.write(
+          "\nMegjegyz\xE9s: az MCP szerver (haszno-mcp) is ebb\u0151l a f\xE1jlb\xF3l olvas,\nez\xE9rt elegend\u0151 egyszer futtatni a `haszno login` parancsot.\n"
+        );
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  program2.command("logout").description("API-token visszavon\xE1sa \xE9s t\xF6rl\xE9se a konfigur\xE1ci\xF3s f\xE1jlb\xF3l").action(async (_opts, _cmd) => {
+    const existing = { ...readConfigObject(configPath) };
+    const apiKey = existing["apiKey"];
+    if (apiKey && apiKey.startsWith("haszno_")) {
+      const apiUrl = existing["apiUrl"] ?? "https://haszno.com";
+      try {
+        const revokeOpts = { ...httpOpts, baseUrl: apiUrl, apiKey };
+        const { post: httpPost } = await import("./http-5DXIMCSB.js");
+        await httpPost("/api/v1/auth/tokens/revoke-current", {}, revokeOpts);
+        process.stdout.write("Token visszavonva a szerveren.\n");
+      } catch {
+        process.stderr.write("Figyelmeztet\xE9s: a szerver oldali token visszavon\xE1s nem siker\xFClt (h\xE1l\xF3zati hiba vagy token m\xE1r \xE9rv\xE9nytelen). A helyi token t\xF6rl\xE9se folytat\xF3dik.\n");
+      }
+    }
+    delete existing["apiKey"];
+    delete existing["userEmail"];
+    delete existing["userName"];
+    delete existing["shopName"];
+    writeConfigFile(existing, configPath);
+    process.stdout.write(`Kijelentkezve. Token t\xF6r\xF6lve: ${configPath}
+`);
+  });
+  program2.command("whoami").description("Aktu\xE1lis felhaszn\xE1l\xF3 \xE9s bejelentkez\xE9si \xE1llapot").action(async (_opts, cmd) => {
+    const cfg = readConfigObject(configPath);
+    const apiKey = cfg["apiKey"];
+    const userEmail = cfg["userEmail"];
+    const userName = cfg["userName"];
+    const shopName = cfg["shopName"];
+    const apiUrl = cfg["apiUrl"] ?? "https://haszno.com";
+    const data = { userEmail, userName, shopName, apiUrl, authenticated: !!apiKey };
+    if (getJsonFlag(cmd)) {
+      printJson3(data);
+    } else {
+      if (!apiKey) {
+        process.stdout.write("Nincs mentett token. Futtasd: haszno login\n");
+        return;
+      }
+      process.stdout.write(`Felhaszn\xE1l\xF3: ${userName ?? "(ismeretlen)"}
+`);
+      process.stdout.write(`E-mail:      ${userEmail ?? "(ismeretlen)"}
+`);
+      if (shopName) process.stdout.write(`Bolt:        ${shopName}
+`);
+      process.stdout.write(`API URL:     ${apiUrl}
+`);
+      process.stdout.write(`Token:       ${apiKey.slice(0, 12)}...
+`);
+    }
+  });
+  const configureAction = async (opts, cmd) => {
     const globals = cmd?.optsWithGlobals() ?? {};
     let apiUrl = opts.apiUrl ?? globals.apiUrl;
     let apiKey = opts.apiKey ?? globals.apiKey;
@@ -2037,7 +2242,7 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH }
         process.exit(2);
         return;
       }
-      process.stdout.write("Haszno CLI bejelentkez\xE9s\n");
+      process.stdout.write("Haszno CLI konfigur\xE1ci\xF3\n");
       process.stdout.write(`Konfigur\xE1ci\xF3s f\xE1jl: ${configPath}
 
 `);
@@ -2051,11 +2256,10 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH }
     process.stdout.write(`Konfigur\xE1ci\xF3s f\xE1jl elmentve: ${configPath}
 `);
     process.stdout.write(
-      "Az HASZNO_API_URL / HASZNO_API_KEY k\xF6rnyezeti v\xE1ltoz\xF3k \xE9s a\n--api-url / --api-key jelz\u0151k priorit\xE1st \xE9lveznek a f\xE1jllal szemben.\n\nMegjegyz\xE9s: az MCP szerver (haszno-mcp) is ebb\u0151l a f\xE1jlb\xF3l olvas,\nez\xE9rt elegend\u0151 egyszer futtatni a `haszno login` parancsot.\n"
+      "Az HASZNO_API_URL / HASZNO_API_KEY k\xF6rnyezeti v\xE1ltoz\xF3k \xE9s a\n--api-url / --api-key jelz\u0151k priorit\xE1st \xE9lveznek a f\xE1jllal szemben.\n\nMegjegyz\xE9s: az MCP szerver (haszno-mcp) is ebb\u0151l a f\xE1jlb\xF3l olvas,\nez\xE9rt elegend\u0151 egyszer futtatni a `haszno configure` parancsot.\n"
     );
   };
-  program2.command("login").description("Haszno API hiteles\xEDt\xE9si adatok ment\xE9se (~/.config/haszno/config.json)").option("--api-url <url>", "Haszno API alap URL-je").option("--api-key <key>", "Haszno API kulcs").action(loginAction);
-  program2.command("configure").description("API hiteles\xEDt\xE9si adatok ment\xE9se (alias: haszno login)").option("--api-url <url>", "Haszno API alap URL-je").option("--api-key <key>", "Haszno API kulcs").action(loginAction);
+  program2.command("configure").description("API kulcs k\xF6zvetlen ment\xE9se (haszno configure --api-key <kulcs>)").option("--api-url <url>", "Haszno API alap URL-je").option("--api-key <key>", "Haszno API kulcs").action(configureAction);
   const account = program2.command("account").description("Fi\xF3k \xE1llapot, be\xE1ll\xEDt\xE1sok \xE9s eg\xE9szs\xE9g / account health & settings");
   account.command("ping").description("API el\xE9rhet\u0151s\xE9g ellen\u0151rz\xE9se (exit 0 = ok, 1 = hiba)").action(async (_opts, cmd) => {
     try {
@@ -2256,6 +2460,47 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH }
 `);
       process.stdout.write(`API: ${apiStatus === "ok" ? "OK el\xE9rhet\u0151" : "nem el\xE9rhet\u0151"}
 `);
+    }
+  });
+  const tokens = program2.command("tokens").description("API tokenek kezel\xE9se");
+  tokens.command("list").description("Akt\xEDv API tokenek list\xE1ja (session-alap\xFA hiteles\xEDt\xE9s sz\xFCks\xE9ges)").action(async (_opts, cmd) => {
+    try {
+      const { get: httpGet } = await import("./http-5DXIMCSB.js");
+      const items = await httpGet("/api/v1/auth/tokens", httpOpts);
+      if (getJsonFlag(cmd)) {
+        printJson3(items);
+      } else {
+        if (!Array.isArray(items) || items.length === 0) {
+          process.stdout.write("Nincs akt\xEDv token.\n");
+          return;
+        }
+        process.stdout.write("Akt\xEDv tokenek:\n");
+        for (const t of items) {
+          const expires = t.expiresAt ? t.expiresAt.slice(0, 10) : "nem j\xE1r le";
+          const lastUsed = t.lastUsedAt ? t.lastUsedAt.slice(0, 10) : "soha";
+          process.stdout.write(`  #${t.id}  ${t.name.padEnd(20)}  ${t.scope.padEnd(12)}  lej\xE1r: ${expires}  utolj\xE1ra: ${lastUsed}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  tokens.command("revoke <id>").description("API token visszavon\xE1sa azonos\xEDt\xF3 alapj\xE1n (session-alap\xFA hiteles\xEDt\xE9s sz\xFCks\xE9ges)").action(async (idStr, _opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id) || id <= 0) {
+      process.stderr.write("\xC9rv\xE9nytelen token azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { del: httpDel } = await import("./http-5DXIMCSB.js");
+      const result = await httpDel(`/api/v1/auth/tokens/${id}`, httpOpts);
+      if (getJsonFlag(cmd)) printJson3(result);
+      else process.stdout.write(`Token #${id} visszavonva.
+`);
+    } catch (err) {
+      handleError2(err);
     }
   });
 }
@@ -3127,10 +3372,11 @@ function registerActionsCommands(program2, client2) {
       if (!productId) die5('A --product-id k\xF6telez\u0151 az "ar" t\xEDpushoz', 2);
       if (!price) die5('A --price k\xF6telez\u0151 az "ar" t\xEDpushoz', 2);
       const pid = parseInt(productId, 10);
-      const priceGross = parseFloat(price);
+      const priceNum = Number(price);
       if (isNaN(pid) || pid <= 0) die5("\xC9rv\xE9nytelen --product-id", 2);
-      if (isNaN(priceGross) || priceGross <= 0) die5("\xC9rv\xE9nytelen --price \u2014 pozit\xEDv sz\xE1mnak kell lennie", 2);
-      actionInput = { type: "ar", productId: pid, priceGross };
+      if (!Number.isFinite(priceNum) || priceNum <= 0) die5("\xC9rv\xE9nytelen --price \u2014 pozit\xEDv eg\xE9sz sz\xE1m sz\xFCks\xE9ges (Ft)", 2);
+      if (!Number.isInteger(priceNum)) die5("A --price \xE9rt\xE9knek eg\xE9sz sz\xE1mnak kell lennie (Ft, pl. 180000)", 2);
+      actionInput = { type: "ar", productId: pid, priceGross: priceNum };
     } else {
       if (!networkProductId) die5('A --network-product-id k\xF6telez\u0151 az "import" t\xEDpushoz', 2);
       const nid = parseInt(networkProductId, 10);
@@ -3159,6 +3405,1276 @@ function registerActionsCommands(program2, client2) {
   });
 }
 
+// src/commands/shop.ts
+import { createInterface as createInterface4 } from "readline";
+import { readFileSync as readFileSync3, readdirSync, statSync } from "fs";
+import { join, extname } from "path";
+function getJsonFlag2(cmd) {
+  try {
+    return cmd.optsWithGlobals().json === true;
+  } catch {
+    return false;
+  }
+}
+function fmt3(n) {
+  return n.toLocaleString("hu-HU") + " Ft";
+}
+function printAdTable(ads) {
+  if (ads.length === 0) {
+    process.stdout.write("Nincs tal\xE1lat.\n");
+    return;
+  }
+  for (const ad of ads) {
+    const rawStatus = ad.status ?? "";
+    const status = rawStatus === "aktiv" ? "akt\xEDv" : rawStatus;
+    const reserved = ad.reserved ? " [foglalt]" : "";
+    process.stdout.write(
+      `  #${String(ad.id).padStart(5)}  ${fmt3(ad.priceGross ?? 0).padStart(12)}  ${status.padEnd(10)}${reserved}  ${ad.title}
+`
+    );
+  }
+}
+function printReservation(r) {
+  const full = r;
+  process.stdout.write(`  Foglal\xE1s #${r.id}
+`);
+  if (full.ad) {
+    process.stdout.write(`    Hirdet\xE9s:  #${full.adId} ${full.ad.title}
+`);
+  } else {
+    process.stdout.write(`    Hirdet\xE9s:  #${r.adId}
+`);
+  }
+  process.stdout.write(`    \xC1llapot:   ${r.status}
+`);
+  if (r.heldUntil) {
+    process.stdout.write(`    Hat\xE1rid\u0151:  ${r.heldUntil}
+`);
+  }
+  if (full.message) {
+    process.stdout.write(`    \xDCzenet:    ${full.message}
+`);
+  }
+  if (r.offerPriceGross) {
+    process.stdout.write(`    Aj\xE1nlott \xE1r:    ${fmt3(r.offerPriceGross)}
+`);
+  }
+  if (r.counterPriceGross) {
+    process.stdout.write(`    Ellenaj\xE1nlat:   ${fmt3(r.counterPriceGross)}
+`);
+  }
+  if (r.agreedPriceGross) {
+    process.stdout.write(`    Elfogadott \xE1r:  ${fmt3(r.agreedPriceGross)}
+`);
+  }
+  if (full.buyerPhone) {
+    process.stdout.write(`    Vev\u0151 tel.:  ${full.buyerPhone}
+`);
+  }
+  if (full.buyerEmail) {
+    process.stdout.write(`    Vev\u0151 e-mail: ${full.buyerEmail}
+`);
+  }
+  if (full.sellerPhone) {
+    process.stdout.write(`    Elad\xF3 tel.:  ${full.sellerPhone}
+`);
+  }
+  if (full.sellerEmail) {
+    process.stdout.write(`    Elad\xF3 e-mail: ${full.sellerEmail}
+`);
+  }
+  if (full.sellerName) {
+    process.stdout.write(`    Elad\xF3 neve:  ${full.sellerName}
+`);
+  }
+  process.stdout.write(`    L\xE9trehozva: ${r.createdAt}
+`);
+}
+async function askConfirm4(message) {
+  if (!process.stdin.isTTY) return false;
+  const rl = createInterface4({ input: process.stdin, output: process.stderr });
+  return new Promise((resolve) => {
+    rl.question(`${message} [y/N] `, (ans) => {
+      rl.close();
+      resolve(ans.toLowerCase() === "y" || ans.toLowerCase() === "igen");
+    });
+  });
+}
+function parseAttrs(pairs) {
+  const result = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq < 1) {
+      process.stderr.write(`\xC9rv\xE9nytelen --attr \xE9rt\xE9k: "${pair}" (form\xE1tum: kulcs=\xE9rt\xE9k)
+`);
+      process.exit(2);
+    }
+    result[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return result;
+}
+function registerShopCommands(program2, shopClient2, _opts) {
+  const shop = program2.command("shop").description("Haszno Shop hirdet\xE9si piac");
+  shop.command("categories").description("Hirdet\xE9si kateg\xF3ri\xE1k \xE9s k\xF6telez\u0151 attrib\xFAtumok").action(async (_opts2, cmd) => {
+    try {
+      const cats = await shopClient2.categories.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(cats);
+      } else {
+        for (const cat of cats) {
+          process.stdout.write(`${cat.key}  ${cat.label}
+`);
+          for (const sub of cat.subcategories ?? []) {
+            const reqAttrs = sub.attrs?.filter((a) => a.required).map((a) => a.key).join(", ") ?? "";
+            process.stdout.write(
+              `  \u2514\u2500 ${sub.key.padEnd(30)} ${sub.label}${reqAttrs ? `  [k\xF6t.: ${reqAttrs}]` : ""}
+`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("search [query]").description("Hirdet\xE9sek keres\xE9se").option("--category <id>", "Kateg\xF3ria sz\u0171r\u0151").option("--subcategory <id>", "Alkateg\xF3ria sz\u0171r\u0151").option("--min-price <Ft>", "Minimum \xE1r (brutt\xF3 Ft)").option("--max-price <Ft>", "Maximum \xE1r (brutt\xF3 Ft)").option("--county <megye>", "Megye sz\u0171r\u0151").option("--city <v\xE1ros>", "V\xE1ros sz\u0171r\u0151").option("--sort <m\xF3d>", "Rendez\xE9s: newest, price_asc, price_desc", "newest").option("--page <n>", "Oldalsz\xE1m", "1").action(
+    async (query, opts, cmd) => {
+      try {
+        const result = await shopClient2.ads.search({
+          q: query,
+          category: opts.category,
+          subcategory: opts.subcategory,
+          minPrice: opts.minPrice ? parseInt(opts.minPrice, 10) : void 0,
+          maxPrice: opts.maxPrice ? parseInt(opts.maxPrice, 10) : void 0,
+          county: opts.county,
+          city: opts.city,
+          sort: opts.sort,
+          page: opts.page ? parseInt(opts.page, 10) : void 0
+        });
+        if (getJsonFlag2(cmd)) {
+          printJson3(result);
+        } else {
+          const ads = Array.isArray(result) ? result : result.items ?? [];
+          printAdTable(ads);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("show <id>").description("Hirdet\xE9s r\xE9szletei").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.ads.get(id);
+      if (getJsonFlag2(cmd)) {
+        printJson3(ad);
+      } else {
+        process.stdout.write(`#${ad.id}  ${ad.title}
+`);
+        process.stdout.write(`  \xC1r:        ${fmt3(ad.priceGross ?? 0)}${ad.negotiable ? " (alku)" : ""}
+`);
+        process.stdout.write(`  \xC1llapot:   ${ad.status}${ad.reserved ? " [foglalt]" : ""}
+`);
+        if (ad.condition) process.stdout.write(`  \xC1llapot:   ${ad.condition}
+`);
+        if (ad.county || ad.city) {
+          process.stdout.write(`  Helysz\xEDn:  ${[ad.county, ad.city].filter(Boolean).join(", ")}
+`);
+        }
+        if (ad.description) {
+          process.stdout.write(`  Le\xEDr\xE1s:
+${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
+`);
+        }
+        if (Object.keys(ad.attrs ?? {}).length > 0) {
+          process.stdout.write("  Attrib\xFAtumok:\n");
+          for (const [k, v] of Object.entries(ad.attrs)) {
+            process.stdout.write(`    ${k}: ${v}
+`);
+          }
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("price-hint").description("\xC1rjavaslat kateg\xF3ria alapj\xE1n").option("--category <id>", "Kateg\xF3ria").option("--subcategory <id>", "Alkateg\xF3ria").action(async (opts, cmd) => {
+    try {
+      const hint = await shopClient2.ads.priceHint({
+        category: opts.category,
+        subcategory: opts.subcategory
+      });
+      if (getJsonFlag2(cmd)) {
+        printJson3(hint);
+      } else {
+        if (!hint) {
+          process.stdout.write("Nincs elegend\u0151 adat az \xE1rjavaslathoz.\n");
+        } else {
+          process.stdout.write("\xC1rjavaslat:\n");
+          process.stdout.write(`  25. percentilis: ${fmt3(hint.p25)}
+`);
+          process.stdout.write(`  75. percentilis: ${fmt3(hint.p75)}
+`);
+          process.stdout.write(`  Mintaalap: ${hint.count} hirdet\xE9s
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("post").description("\xDAj hirdet\xE9s felad\xE1sa").option("--title <c\xEDm>", "Hirdet\xE9s c\xEDme").option("--category <kulcs>", "Kateg\xF3ria kulcsa (pl. elekt)").option("--subcategory <kulcs>", "Alkateg\xF3ria kulcsa").option("--price <Ft>", "V\xE9tel\xE1r (brutt\xF3 Ft, \xFCresen = \xE1r n\xE9lk\xFCl)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "\xC1llapot: uj | ujszeru | hasznalt | serult").option("--defects <sz\xF6veg>", "Hib\xE1k, s\xE9r\xFCl\xE9sek le\xEDr\xE1sa (k\xF6telez\u0151 hasznalt/serult \xE1llapotn\xE1l, min. 10 karakter)").option("--description <le\xEDr\xE1s>", "Hirdet\xE9s le\xEDr\xE1sa").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--contact-email <email>", "Kapcsolattart\xF3 e-mail-c\xEDm (k\xF6telez\u0151)").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--resellable", "Viszontelad\xF3i jogok enged\xE9lyez\xE9se").option("--commission-pct <sz\xE1m>", "Viszontelad\xF3i jutal\xE9k (%)", "0").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--image <f\xE1jl>", "K\xE9pf\xE1jl felt\xF6lt\xE9se (megism\xE9telhet\u0151)", (v, a) => [...a, v], []).option("--from-photos", "AI-javaslatot k\xE9r a felt\xF6lt\xF6tt k\xE9pek alapj\xE1n").option("--remove-bg", "H\xE1tt\xE9r elt\xE1vol\xEDt\xE1sa a felt\xF6lt\xF6tt k\xE9pekr\u0151l (AI)").option("--dry-run", "Csak megjelen\xEDti a k\xE9r\xE9st, nem k\xFCldi el").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
+    async (opts, cmd) => {
+      try {
+        const imageUrls = [];
+        const imageNumericIds = [];
+        if (opts.image.length > 0) {
+          process.stderr.write(`${opts.image.length} k\xE9p felt\xF6lt\xE9se...
+`);
+          for (const filePath of opts.image) {
+            const uploaded = await shopClient2.myAds.uploadImage(filePath);
+            let result = uploaded;
+            if (opts.removeBg) {
+              process.stderr.write(`H\xE1tt\xE9r elt\xE1vol\xEDt\xE1sa: k\xE9p #${uploaded.id}...
+`);
+              try {
+                result = await shopClient2.images.removeBg(uploaded.id);
+              } catch (err) {
+                process.stderr.write(`Figyelmeztet\xE9s: h\xE1tt\xE9r-elt\xE1vol\xEDt\xE1s sikertelen (${err instanceof Error ? err.message : String(err)}), eredeti k\xE9p haszn\xE1lata.
+`);
+                result = uploaded;
+              }
+            }
+            imageUrls.push(result.url);
+            imageNumericIds.push(result.id);
+          }
+        }
+        let aiSuggest = {};
+        if (opts.fromPhotos && imageNumericIds.length > 0) {
+          process.stderr.write("AI-javaslat k\xE9r\xE9se a k\xE9pekb\u0151l...\n");
+          aiSuggest = await shopClient2.myAds.fromPhotos(imageNumericIds);
+          process.stdout.write("AI-javaslat:\n");
+          printJson3(aiSuggest);
+        }
+        const attrs = parseAttrs(opts.attr);
+        const title = opts.title ?? aiSuggest.title ?? "";
+        const category = opts.category ?? aiSuggest.categoryId ?? "";
+        const condition = opts.condition ?? aiSuggest.condition ?? "";
+        const county = opts.county ?? "";
+        const city = opts.city ?? "";
+        const contactEmail = opts.contactEmail ?? "";
+        const body = {
+          title,
+          category,
+          subcategory: opts.subcategory ?? aiSuggest.subcategoryId ?? null,
+          priceGross: opts.price != null ? parseInt(opts.price, 10) : aiSuggest.suggestedPriceGross ?? null,
+          negotiable: opts.negotiable ?? false,
+          condition,
+          defects: opts.defects ?? null,
+          description: opts.description ?? aiSuggest.description ?? "",
+          county,
+          city,
+          attrs: { ...aiSuggest.attrs, ...attrs },
+          images: imageUrls,
+          contactName: opts.contactName ?? "",
+          contactPhone: opts.contactPhone ?? null,
+          contactEmail,
+          showPhone: opts.showPhone ?? false,
+          resellable: opts.resellable ?? false,
+          partnerCommissionPct: opts.commissionPct ? parseFloat(opts.commissionPct) : 0
+        };
+        if (!body.title) {
+          process.stderr.write("A --title megad\xE1sa k\xF6telez\u0151 (vagy --from-photos az AI-javaslathoz).\n");
+          process.exit(2);
+          return;
+        }
+        if (opts.dryRun) {
+          process.stdout.write("K\xE9r\xE9s (dry-run, NEM LETT ELK\xDCLDVE):\n");
+          printJson3(body);
+          return;
+        }
+        const missing = [];
+        if (!body.category) missing.push("--category");
+        if (!body.condition) missing.push("--condition");
+        if (!body.county) missing.push("--county");
+        if (!body.city) missing.push("--city");
+        if (!body.contactName) missing.push("--contact-name");
+        if (!body.contactEmail) missing.push("--contact-email");
+        if (missing.length > 0) {
+          process.stderr.write(`Hi\xE1nyz\xF3 k\xF6telez\u0151 mez\u0151${missing.length > 1 ? "k" : ""}: ${missing.join(", ")}
+`);
+          process.exit(2);
+          return;
+        }
+        if (!opts.yes) {
+          process.stdout.write("Hirdet\xE9s tervezett adatai:\n");
+          printJson3(body);
+          const ok = await askConfirm4("Feladjuk \xEDgy?");
+          if (!ok) {
+            process.stdout.write("Megszak\xEDtva.\n");
+            process.exit(0);
+            return;
+          }
+        }
+        const ad = await shopClient2.myAds.post(body);
+        if (getJsonFlag2(cmd)) {
+          printJson3(ad);
+        } else {
+          process.stdout.write(`Hirdet\xE9s feladva: #${ad.id}  ${ad.title}
+`);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("my").description("Saj\xE1t hirdet\xE9sek list\xE1ja").action(async (_opts2, cmd) => {
+    try {
+      const ads = await shopClient2.myAds.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(ads);
+      } else {
+        printAdTable(Array.isArray(ads) ? ads : []);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("edit <id>").description("Hirdet\xE9s szerkeszt\xE9se").option("--title <c\xEDm>", "\xDAj c\xEDm").option("--price <Ft>", "\xDAj \xE1r (brutt\xF3 Ft)").option("--negotiable", "Alkuk\xE9pes").option("--condition <\xE1llapot>", "\xC1llapot: uj | ujszeru | hasznalt | serult").option("--description <le\xEDr\xE1s>", "Le\xEDr\xE1s").option("--county <megye>", "Megye").option("--city <v\xE1ros>", "V\xE1ros").option("--attr <kulcs=\xE9rt\xE9k>", "Attrib\xFAtum", (v, a) => [...a, v], []).option("--contact-name <n\xE9v>", "Kapcsolattart\xF3 neve").option("--contact-phone <telefon>", "Kapcsolattart\xF3 telefonsz\xE1ma").option("--contact-email <email>", "Kapcsolattart\xF3 e-mail-c\xEDm").option("--show-phone", "Telefonsz\xE1m megjelen\xEDt\xE9se").option("--resellable", "Viszontelad\xF3i jogok enged\xE9lyez\xE9se").option("--commission-pct <sz\xE1m>", "Viszontelad\xF3i jutal\xE9k (%)").action(
+    async (idStr, opts, cmd) => {
+      const id = parseInt(idStr, 10);
+      if (isNaN(id)) {
+        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        process.exit(2);
+        return;
+      }
+      try {
+        const attrs = parseAttrs(opts.attr);
+        const body = {};
+        if (opts.title) body.title = opts.title;
+        if (opts.price) body.priceGross = parseInt(opts.price, 10);
+        if (opts.negotiable !== void 0) body.negotiable = opts.negotiable;
+        if (opts.condition) body.condition = opts.condition;
+        if (opts.description) body.description = opts.description;
+        if (opts.county) body.county = opts.county;
+        if (opts.city) body.city = opts.city;
+        if (Object.keys(attrs).length > 0) body.attrs = attrs;
+        if (opts.contactName) body.contactName = opts.contactName;
+        if (opts.contactPhone) body.contactPhone = opts.contactPhone;
+        if (opts.contactEmail) body.contactEmail = opts.contactEmail;
+        if (opts.showPhone !== void 0) body.showPhone = opts.showPhone;
+        if (opts.resellable !== void 0) body.resellable = opts.resellable;
+        if (opts.commissionPct) body.partnerCommissionPct = parseFloat(opts.commissionPct);
+        const ad = await shopClient2.myAds.edit(id, body);
+        if (getJsonFlag2(cmd)) {
+          printJson3(ad);
+        } else {
+          process.stdout.write(`Hirdet\xE9s #${ad.id} friss\xEDtve.
+`);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("pause <id>").description("Hirdet\xE9s sz\xFCneteltet\xE9se").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.myAds.pause(id);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} sz\xFCneteltetve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("activate <id>").description("Hirdet\xE9s aktiv\xE1l\xE1sa").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.myAds.activate(id);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} aktiv\xE1lva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("sold <id>").description("Hirdet\xE9s eladottnak jel\xF6l\xE9se").option("--price <Ft>", "T\xE9nyleges elad\xE1si \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const body = opts.price ? { soldPriceGross: parseInt(opts.price, 10) } : {};
+      const ad = await shopClient2.myAds.sold(id, body);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} eladottnak jel\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("renew <id>").description("Hirdet\xE9s meg\xFAj\xEDt\xE1sa").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const ad = await shopClient2.myAds.renew(id);
+      if (getJsonFlag2(cmd)) printJson3(ad);
+      else process.stdout.write(`Hirdet\xE9s #${id} meg\xFAj\xEDtva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("delete <id>").description("Hirdet\xE9s t\xF6rl\xE9se").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.myAds.delete(id);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${id} t\xF6r\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("inquiries").description("Be\xE9rkezett \xFCzenetek list\xE1ja").action(async (_opts2, cmd) => {
+    try {
+      const items = await shopClient2.inquiries.listReceived();
+      if (getJsonFlag2(cmd)) {
+        printJson3(items);
+      } else {
+        if (!Array.isArray(items) || items.length === 0) {
+          process.stdout.write("Nincs be\xE9rkezett \xFCzenet.\n");
+          return;
+        }
+        for (const item of items) {
+          const read = item.readAt ? "" : " [\xFAj]";
+          process.stdout.write(`  #${item.id}${read}  Hirdet\xE9s #${item.adId}  ${item.name}
+`);
+          process.stdout.write(`    ${item.message.slice(0, 80)}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("inquire <adId>").description("\xDCzenet k\xFCld\xE9se elad\xF3nak").option("--name <n\xE9v>", "A felad\xF3 neve (k\xF6telez\u0151)").option("--email <email>", "A felad\xF3 e-mail-c\xEDm (k\xF6telez\u0151)").option("--phone <telefon>", "A felad\xF3 telefonsz\xE1ma (opcion\xE1lis)").option("--message <sz\xF6veg>", "\xDCzenet sz\xF6vege (k\xF6telez\u0151)").action(async (adIdStr, opts, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.name) {
+      process.stderr.write("--name megad\xE1sa k\xF6telez\u0151.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.email) {
+      process.stderr.write("--email megad\xE1sa k\xF6telez\u0151.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.message) {
+      process.stderr.write("--message megad\xE1sa k\xF6telez\u0151.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const body = {
+        name: opts.name,
+        email: opts.email,
+        message: opts.message
+      };
+      if (opts.phone) body.phone = opts.phone;
+      const result = await shopClient2.inquiries.send(adId, body);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write("\xDCzenet elk\xFCldve.\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("favorite <adId>").description("Hirdet\xE9s ment\xE9se kedvencekbe").action(async (adIdStr, _opts2, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.favorites.add(adId);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${adId} hozz\xE1adva a kedvencekhez.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("unfavorite <adId>").description("Hirdet\xE9s elt\xE1vol\xEDt\xE1sa kedvencekb\u0151l").action(async (adIdStr, _opts2, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.favorites.remove(adId);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${adId} elt\xE1vol\xEDtva a kedvencekb\u0151l.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("favorites").description("Kedvenc hirdet\xE9sek list\xE1ja").action(async (_opts2, cmd) => {
+    try {
+      const ads = await shopClient2.favorites.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(ads);
+      } else {
+        printAdTable(Array.isArray(ads) ? ads : []);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("reserve <adId>").description("Hirdet\xE9s lefoglal\xE1sa (ingyenes \u2014 a fizet\xE9s k\xF6zvetlen\xFCl az elad\xF3val zajlik)").option("--message <sz\xF6veg>", "\xDCzenet az elad\xF3nak (max. 1000 karakter)").option("--offer <Ft>", "Aj\xE1nlott \xE1r (brutt\xF3 Ft, ellenjavaslat)").option("--phone <telefon>", "Telefonsz\xE1m (az elad\xF3nak \xE1tadva elfogad\xE1skor, max. 50 kar.)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(
+    async (adIdStr, opts, cmd) => {
+      const adId = parseInt(adIdStr, 10);
+      if (isNaN(adId)) {
+        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        process.exit(2);
+        return;
+      }
+      if (!opts.yes) {
+        process.stdout.write(
+          "A foglal\xE1s INGYENES \u2014 a fizet\xE9s \xE9s az \xE1tad\xE1s k\xF6zvetlen\xFCl az elad\xF3val t\xF6rt\xE9nik.\n"
+        );
+        const ok = await askConfirm4(`Lefoglalod a #${adId} hirdet\xE9st?`);
+        if (!ok) {
+          process.stdout.write("Megszak\xEDtva.\n");
+          process.exit(0);
+          return;
+        }
+      }
+      try {
+        const body = {};
+        if (opts.message) body.message = opts.message;
+        if (opts.offer) body.offerPriceGross = parseInt(opts.offer, 10);
+        if (opts.phone) body.phone = opts.phone;
+        const { reservation: reservation2 } = await shopClient2.reservations.create(adId, body);
+        if (getJsonFlag2(cmd)) {
+          printJson3(reservation2);
+        } else {
+          process.stdout.write("Foglal\xE1s l\xE9trehozva:\n");
+          printReservation(reservation2);
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  shop.command("reservations").description("Foglal\xE1saim list\xE1ja").option("--as <buyer|seller>", "Szerep: buyer (vev\u0151, alap\xE9rt.) vagy seller (elad\xF3)", "buyer").option("--status <\xE1llapot>", "\xC1llapot sz\u0171r\u0151").option("--page <n>", "Oldalsz\xE1m", "1").action(
+    async (opts, cmd) => {
+      try {
+        const result = await shopClient2.reservations.list({
+          role: opts.as ?? "buyer",
+          status: opts.status,
+          page: opts.page ? parseInt(opts.page, 10) : void 0
+        });
+        if (getJsonFlag2(cmd)) {
+          printJson3(result);
+        } else {
+          const items = result.items ?? [];
+          if (items.length === 0) {
+            process.stdout.write("Nincs foglal\xE1s.\n");
+            return;
+          }
+          for (const r of items) {
+            printReservation(r);
+            process.stdout.write("\n");
+          }
+        }
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  const reservation = shop.command("reservation").description("Foglal\xE1s kezel\xE9se (elfogad / elutas\xEDt / lemond / teljes\xEDt)");
+  reservation.command("accept <id>").description("Foglal\xE1s elfogad\xE1sa (elad\xF3k\xE9nt)").option("--held-until <ISO>", "Hat\xE1rid\u0151 a vev\u0151nek (ISO-8601 d\xE1tum/id\u0151)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.accept(id, { heldUntil: opts.heldUntil });
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} elfogadva (\xE1llapot: ${r.status}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("decline <id>").description("Foglal\xE1s elutas\xEDt\xE1sa (elad\xF3k\xE9nt)").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.decline(id);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} elutas\xEDtva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("cancel <id>").description("Foglal\xE1s lemond\xE1sa (vev\u0151k\xE9nt)").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.cancel(id);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} visszavonva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("complete <id>").description("Foglal\xE1s teljes\xEDt\xE9se (elad\xF3k\xE9nt)").option("--price <Ft>", "T\xE9nyleges elad\xE1si \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const body = opts.price ? { soldPriceGross: parseInt(opts.price, 10) } : {};
+      const { reservation: r } = await shopClient2.reservations.complete(id, body);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Foglal\xE1s #${id} teljes\xEDtve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("counter <id>").description("Ellenaj\xE1nlat k\xFCld\xE9se (elad\xF3k\xE9nt, am\xEDg a foglal\xE1s f\xFCgg\u0151ben van)").requiredOption("--price <Ft>", "Ellenaj\xE1nlott \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    const price = parseInt(opts.price, 10);
+    if (isNaN(price) || price <= 0) {
+      process.stderr.write("\xC9rv\xE9nytelen \xE1r.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.counter(id, price);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Ellenaj\xE1nlat elk\xFCldve: ${fmt3(price)} (foglal\xE1s #${id}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("accept-counter <id>").description("Elad\xF3i ellenaj\xE1nlat elfogad\xE1sa (vev\u0151k\xE9nt)").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reservation: r } = await shopClient2.reservations.acceptCounter(id);
+      if (getJsonFlag2(cmd)) printJson3(r);
+      else process.stdout.write(`Ellenaj\xE1nlat elfogadva (foglal\xE1s #${id}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("messages <id>").description("Foglal\xE1s \xFCzenetei").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { items } = await shopClient2.reservations.messages(id);
+      if (getJsonFlag2(cmd)) {
+        printJson3(items);
+      } else {
+        if (items.length === 0) {
+          process.stdout.write("Nincs \xFCzenet.\n");
+          return;
+        }
+        for (const m of items) {
+          const who = m.author === "buyer" ? "Vev\u0151" : "Elad\xF3";
+          process.stdout.write(`  [${m.createdAt.slice(0, 16)}] ${who}: ${m.body}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("message <id>").description("\xDCzenet k\xFCld\xE9se a foglal\xE1son").requiredOption("--text <sz\xF6veg>", "\xDCzenet sz\xF6vege (1\u20132000 karakter)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.text.trim()) {
+      process.stderr.write("--text megad\xE1sa k\xF6telez\u0151.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { message: m } = await shopClient2.reservations.message(id, opts.text);
+      if (getJsonFlag2(cmd)) printJson3(m);
+      else process.stdout.write(`\xDCzenet elk\xFCldve (#${m.id}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  reservation.command("review <id>").description("\xC9rt\xE9kel\xE9s lead\xE1sa teljes\xEDtett foglal\xE1sra").requiredOption("--rating <1-5>", "\xC9rt\xE9kel\xE9s (1\u20135 csillag)").option("--comment <sz\xF6veg>", "Sz\xF6veges megjegyz\xE9s (max. 1000 karakter)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    const rating = parseInt(opts.rating, 10);
+    if (isNaN(rating) || rating < 1 || rating > 5) {
+      process.stderr.write("--rating \xE9rt\xE9ke 1 \xE9s 5 k\xF6z\xE9 kell essen.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { review } = await shopClient2.reservations.review(id, rating, opts.comment);
+      if (getJsonFlag2(cmd)) printJson3(review);
+      else process.stdout.write(`\xC9rt\xE9kel\xE9s leadva: ${rating} csillag (foglal\xE1s #${id}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const inquiry = shop.command("inquiry").description("\xC9rdekl\u0151d\xE9s kezel\xE9se (elad\xF3k\xE9nt)");
+  inquiry.command("reply <id>").description("V\xE1lasz k\xFCld\xE9se \xE9rdekl\u0151d\u0151nek (elad\xF3k\xE9nt)").requiredOption("--message <sz\xF6veg>", "V\xE1lasz sz\xF6vege (1\u20132000 karakter)").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    if (!opts.message.trim()) {
+      process.stderr.write("--message megad\xE1sa k\xF6telez\u0151.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const { reply } = await shopClient2.inquiries.reply(id, opts.message);
+      if (getJsonFlag2(cmd)) printJson3(reply);
+      else process.stdout.write(`V\xE1lasz elk\xFCldve az \xE9rdekl\u0151d\u0151nek (\xE9rdekl\u0151d\xE9s #${reply.inquiryId}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const savedSearch = shop.command("saved-search").description("Mentett keres\xE9sek kezel\xE9se");
+  savedSearch.command("list").description("Mentett keres\xE9sek list\xE1ja").action(async (_opts2, cmd) => {
+    try {
+      const items = await shopClient2.savedSearches.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(items);
+      } else {
+        if (items.length === 0) {
+          process.stdout.write("Nincs mentett keres\xE9s.\n");
+          return;
+        }
+        for (const s of items) {
+          const alert = s.alertEnabled ? " [\xE9rtes\xEDt\u0151: be]" : "";
+          process.stdout.write(`  #${s.id}  ${s.name}${alert}
+`);
+          const f = s.filters;
+          const parts = [];
+          if (f.q) parts.push(`\u201E${f.q}"`);
+          if (f.cat) parts.push(`kat:${f.cat}`);
+          if (f.sub) parts.push(`alkat:${f.sub}`);
+          if (f.min != null) parts.push(`min ${fmt3(f.min)}`);
+          if (f.max != null) parts.push(`max ${fmt3(f.max)}`);
+          if (f.county) parts.push(f.county);
+          if (f.cond) parts.push(f.cond);
+          if (parts.length > 0) process.stdout.write(`       ${parts.join(", ")}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  savedSearch.command("add").description('\xDAj mentett keres\xE9s (ugyanazok a sz\u0171r\u0151k, mint a "search" parancsn\xE1l)').requiredOption("--name <n\xE9v>", "A mentett keres\xE9s neve").option("--query <sz\xF6veg>", "Keres\u0151sz\xF6veg").option("--category <id>", "Kateg\xF3ria").option("--subcategory <id>", "Alkateg\xF3ria").option("--min-price <Ft>", "Minimum \xE1r").option("--max-price <Ft>", "Maximum \xE1r").option("--county <megye>", "Megye").option("--condition <\xE1llapot>", "\xC1llapot: uj | ujszeru | hasznalt | serult").option("--no-alert", "E-mail \xE9rtes\xEDt\u0151 kikapcsol\xE1sa (alap\xE9rt.: be)").action(async (opts, cmd) => {
+    const filters = {};
+    if (opts.query) filters.q = opts.query;
+    if (opts.category) filters.cat = opts.category;
+    if (opts.subcategory) filters.sub = opts.subcategory;
+    if (opts.minPrice) filters.min = parseInt(opts.minPrice, 10);
+    if (opts.maxPrice) filters.max = parseInt(opts.maxPrice, 10);
+    if (opts.county) filters.county = opts.county;
+    if (opts.condition) filters.cond = opts.condition;
+    try {
+      const s = await shopClient2.savedSearches.add({ name: opts.name, filters, alertEnabled: opts.alert !== false });
+      if (getJsonFlag2(cmd)) printJson3(s);
+      else process.stdout.write(`Mentett keres\xE9s l\xE9trehozva: #${s.id}  ${s.name}
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  savedSearch.command("remove <id>").description("Mentett keres\xE9s t\xF6rl\xE9se").action(async (idStr, _opts2, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.savedSearches.remove(id);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Mentett keres\xE9s #${id} t\xF6r\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("watch <adId>").description("Feliratkoz\xE1s \xE1res\xE9s-\xE9rtes\xEDt\u0151re egy hirdet\xE9sn\xE9l").action(async (adIdStr, _opts2, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.watch.watch(adId);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${adId} \xE1res\xE9s-\xE9rtes\xEDt\u0151re feliratkozva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("unwatch <adId>").description("Leiratkoz\xE1s \xE1res\xE9s-\xE9rtes\xEDt\u0151r\u0151l").action(async (adIdStr, _opts2, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.watch.unwatch(adId);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Hirdet\xE9s #${adId} \xE1res\xE9s-\xE9rtes\xEDt\u0151r\u0151l leiratkozva.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("import-url <url>").description("Hirdet\xE9s import\xE1l\xE1sa URL-b\u0151l (kinyeri a metaadatokat)").option("--post", "Import\xE1lt adatok alapj\xE1n hirdet\xE9st ad fel (interakt\xEDv)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa (csak --post-tal)").action(async (url, opts, cmd) => {
+    try {
+      process.stderr.write("URL elemz\xE9se...\n");
+      const data = await shopClient2.urlImport.importUrl(url);
+      if (getJsonFlag2(cmd)) {
+        printJson3(data);
+        return;
+      }
+      process.stdout.write("Kinyert adatok:\n");
+      if (data.title) process.stdout.write(`  C\xEDm:      ${data.title}
+`);
+      if (data.price) process.stdout.write(`  \xC1r:       ${fmt3(data.price)}
+`);
+      if (data.description) {
+        process.stdout.write(`  Le\xEDr\xE1s:   ${data.description.slice(0, 120)}${data.description.length > 120 ? "\u2026" : ""}
+`);
+      }
+      if (data.images.length > 0) {
+        process.stdout.write(`  K\xE9pek:    ${data.images.length} db
+`);
+      }
+      if (Object.keys(data.parsed).length > 0) {
+        process.stdout.write("  Elemzett:\n");
+        for (const [k, v] of Object.entries(data.parsed)) {
+          process.stdout.write(`    ${k}: ${v}
+`);
+        }
+      }
+      if (opts.post) {
+        if (!opts.yes) {
+          const ok = await askConfirm4("Hirdet\xE9st adsz fel ezekkel az adatokkal?");
+          if (!ok) {
+            process.stdout.write("Megszak\xEDtva.\n");
+            process.exit(0);
+            return;
+          }
+        }
+        const body = {
+          title: data.title ?? "",
+          description: data.description ?? "",
+          priceGross: data.price ?? null,
+          negotiable: false,
+          condition: "hasznalt",
+          county: "",
+          city: "",
+          category: "",
+          images: data.images,
+          attrs: {},
+          contactName: "",
+          contactPhone: null,
+          contactEmail: "",
+          showPhone: false,
+          resellable: false,
+          partnerCommissionPct: 0
+        };
+        if (!body.title) {
+          process.stderr.write('Nem siker\xFClt automatikusan feladni: c\xEDm hi\xE1nyzik. Adj meg --title \xE9s a k\xF6telez\u0151 mez\u0151ket k\xE9zzel a "haszno shop post" paranccsal.\n');
+          process.exit(2);
+          return;
+        }
+        const ad = await shopClient2.myAds.post(body);
+        process.stdout.write(`Hirdet\xE9s feladva: #${ad.id}  ${ad.title}
+`);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const draft = shop.command("draft").description("Hirdet\xE9sv\xE1zlat kezel\xE9se (szerver oldal)");
+  draft.command("show").description("Aktu\xE1lis v\xE1zlat megjelen\xEDt\xE9se").action(async (_opts2, cmd) => {
+    try {
+      const d = await shopClient2.draft.show();
+      if (getJsonFlag2(cmd)) {
+        printJson3(d);
+      } else {
+        if (!d) {
+          process.stdout.write("Nincs mentett v\xE1zlat.\n");
+          return;
+        }
+        process.stdout.write(`V\xE1zlat (mentve: ${d.updatedAt}):
+`);
+        printJson3(d.payload);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  draft.command("save").description("V\xE1zlat ment\xE9se (JSON a stdin-r\u0151l)").action(async (_opts2, cmd) => {
+    try {
+      process.stderr.write("JSON beolvas\xE1sa (stdin)...\n");
+      const chunks = [];
+      for await (const chunk of process.stdin) chunks.push(chunk);
+      const rawText = Buffer.concat(chunks).toString("utf8").trim();
+      if (!rawText) {
+        process.stderr.write("\xDCres bemenet.\n");
+        process.exit(2);
+        return;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(rawText);
+      } catch {
+        process.stderr.write("\xC9rv\xE9nytelen JSON.\n");
+        process.exit(2);
+        return;
+      }
+      const d = await shopClient2.draft.save(payload);
+      if (getJsonFlag2(cmd)) printJson3(d);
+      else process.stdout.write(`V\xE1zlat mentve (${d.updatedAt}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  draft.command("clear").description("V\xE1zlat t\xF6rl\xE9se").action(async (_opts2, cmd) => {
+    try {
+      const result = await shopClient2.draft.clear();
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write("V\xE1zlat t\xF6r\xF6lve.\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  shop.command("post-bulk <forr\xE1s>").description("T\xF6meges hirdet\xE9sfelad\xE1s CSV f\xE1jlb\xF3l vagy k\xF6nyvt\xE1rb\xF3l").option("--from-photos", "K\xF6nyvt\xE1r m\xF3d: alk\xF6nyvt\xE1rank\xE9nt egy hirdet\xE9s, AI-javaslat k\xE9pekb\u0151l").option("--dry-run", "Csak el\u0151n\xE9zet, nem ad fel").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa (k\xF6telez\u0151 az \xE9les felt\xF6lt\xE9shez)").action(async (source, opts, cmd) => {
+    try {
+      let rows = [];
+      let isDirectory = false;
+      try {
+        isDirectory = statSync(source).isDirectory();
+      } catch {
+      }
+      if (opts.fromPhotos || isDirectory) {
+        let entries;
+        try {
+          entries = readdirSync(source).filter((e) => {
+            try {
+              return statSync(join(source, e)).isDirectory();
+            } catch {
+              return false;
+            }
+          });
+        } catch (err) {
+          process.stderr.write(`Nem siker\xFClt beolvasni a k\xF6nyvt\xE1rat: ${err instanceof Error ? err.message : String(err)}
+`);
+          process.exit(2);
+          return;
+        }
+        if (entries.length === 0) {
+          process.stderr.write("Nincs alk\xF6nyvt\xE1r a megadott k\xF6nyvt\xE1rban.\n");
+          process.exit(2);
+          return;
+        }
+        rows = entries.map((e) => ({
+          title: e,
+          category: "",
+          condition: "hasznalt",
+          county: "",
+          city: "",
+          contact_name: "",
+          contact_email: "",
+          images: join(source, e)
+        }));
+      } else {
+        let csvText;
+        try {
+          csvText = readFileSync3(source, "utf8");
+        } catch (err) {
+          process.stderr.write(`Nem siker\xFClt beolvasni a CSV f\xE1jlt: ${err instanceof Error ? err.message : String(err)}
+`);
+          process.exit(2);
+          return;
+        }
+        const lines = csvText.split("\n").map((l) => l.trim()).filter(Boolean);
+        if (lines.length < 2) {
+          process.stderr.write("A CSV f\xE1jl \xFCres vagy csak fejl\xE9cet tartalmaz.\n");
+          process.exit(2);
+          return;
+        }
+        const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/-/g, "_"));
+        rows = lines.slice(1).map((line) => {
+          const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+          const obj = {};
+          headers.forEach((h, i) => {
+            obj[h] = values[i] ?? "";
+          });
+          return obj;
+        });
+      }
+      process.stdout.write(`
+El\u0151n\xE9zet \u2014 ${rows.length} hirdet\xE9s:
+`);
+      process.stdout.write("  #   C\xEDm".padEnd(45) + "  Kateg\xF3ria  \xC1r\n");
+      process.stdout.write("  " + "-".repeat(60) + "\n");
+      rows.forEach((r, i) => {
+        const price = r.price ? fmt3(parseInt(r.price, 10)) : "\u2014";
+        process.stdout.write(`  ${String(i + 1).padStart(3)}  ${r.title.slice(0, 36).padEnd(36)}  ${(r.category || "\u2014").padEnd(10)}  ${price}
+`);
+      });
+      if (opts.dryRun) {
+        process.stdout.write("\n(dry-run: nem lett feladva)\n");
+        return;
+      }
+      if (!opts.yes) {
+        const ok = await askConfirm4(`
+Feladod mind a ${rows.length} hirdet\xE9st?`);
+        if (!ok) {
+          process.stdout.write("Megszak\xEDtva.\n");
+          process.exit(0);
+          return;
+        }
+      }
+      let posted = 0;
+      for (const row of rows) {
+        try {
+          if (opts.fromPhotos || isDirectory) {
+            const dirPath = row.images ?? "";
+            let imageFiles = [];
+            try {
+              imageFiles = readdirSync(dirPath).filter((f) => [".jpg", ".jpeg", ".png", ".webp"].includes(extname(f).toLowerCase())).map((f) => join(dirPath, f));
+            } catch {
+            }
+            const imageUrls = [];
+            const imageIds = [];
+            for (const imgFile of imageFiles) {
+              const uploaded = await shopClient2.myAds.uploadImage(imgFile);
+              imageUrls.push(uploaded.url);
+              imageIds.push(uploaded.id);
+            }
+            let aiSuggest = {};
+            if (imageIds.length > 0) {
+              process.stderr.write(`AI-javaslat k\xE9r\xE9se (${row.title})...
+`);
+              aiSuggest = await shopClient2.myAds.fromPhotos(imageIds);
+            }
+            const title = aiSuggest.title || row.title;
+            const body = {
+              title,
+              category: aiSuggest.categoryId || row.category || "egyeb",
+              subcategory: aiSuggest.subcategoryId ?? null,
+              priceGross: aiSuggest.suggestedPriceGross ?? null,
+              negotiable: false,
+              condition: aiSuggest.condition || row.condition || "hasznalt",
+              county: row.county || "",
+              city: row.city || "",
+              description: aiSuggest.description || row.description || "",
+              images: imageUrls,
+              attrs: aiSuggest.attrs || {},
+              contactName: row.contact_name || "",
+              contactPhone: row.contact_phone || null,
+              contactEmail: row.contact_email || "",
+              showPhone: false,
+              resellable: false,
+              partnerCommissionPct: 0
+            };
+            const ad = await shopClient2.myAds.post(body);
+            process.stdout.write(`  \u2713 Feladva: #${ad.id}  ${ad.title}
+`);
+          } else {
+            const body = {
+              title: row.title,
+              category: row.category,
+              subcategory: row.subcategory || null,
+              priceGross: row.price ? parseInt(row.price, 10) : null,
+              negotiable: row.negotiable === "true" || row.negotiable === "1",
+              condition: row.condition || "hasznalt",
+              defects: row.defects || null,
+              county: row.county,
+              city: row.city,
+              description: row.description || "",
+              images: [],
+              attrs: {},
+              contactName: row.contact_name,
+              contactPhone: row.contact_phone || null,
+              contactEmail: row.contact_email,
+              showPhone: row.show_phone === "true" || row.show_phone === "1",
+              resellable: false,
+              partnerCommissionPct: 0
+            };
+            const ad = await shopClient2.myAds.post(body);
+            process.stdout.write(`  \u2713 Feladva: #${ad.id}  ${ad.title}
+`);
+          }
+          posted++;
+        } catch (err) {
+          const msg = err instanceof HasznoApiError ? `HTTP ${err.status}: ${err.message}` : String(err);
+          process.stdout.write(`  \u2717 Hiba (${row.title}): ${msg}
+`);
+          process.stdout.write(`
+Meg\xE1ll\xE1s az els\u0151 hib\xE1n\xE1l. Feladva: ${posted}/${rows.length}
+`);
+          process.exit(1);
+          return;
+        }
+      }
+      process.stdout.write(`
+K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const profile = shop.command("profile").description("Elad\xF3i profil kezel\xE9se");
+  const sellerType = profile.command("seller-type").description("Elad\xF3i t\xEDpus be\xE1ll\xEDt\xE1sa (egyszer k\xF6telez\u0151 az els\u0151 hirdet\xE9s felad\xE1s\xE1hoz)");
+  sellerType.command("maganszemely").description("Mag\xE1nszem\xE9ly elad\xF3k\xE9nt regisztr\xE1l").action(async (_opts2, cmd) => {
+    try {
+      const body = { sellerType: "maganszemely" };
+      const result = await shopClient2.sellerProfile.set(body);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write("Elad\xF3i t\xEDpus be\xE1ll\xEDtva: mag\xE1nszem\xE9ly.\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  sellerType.command("kereskedo").description("Keresked\u0151k\xE9nt (c\xE9gk\xE9nt) regisztr\xE1l").requiredOption("--company-name <n\xE9v>", "C\xE9g neve").requiredOption("--company-address <c\xEDm>", "C\xE9g sz\xE9khelye").option("--company-reg-number <sz\xE1m>", "C\xE9gjegyz\xE9ksz\xE1m (opcion\xE1lis)").action(async (opts, cmd) => {
+    try {
+      const body = {
+        sellerType: "kereskedo",
+        companyName: opts.companyName,
+        companyAddress: opts.companyAddress,
+        companyRegNumber: opts.companyRegNumber ?? null
+      };
+      const result = await shopClient2.sellerProfile.set(body);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Elad\xF3i t\xEDpus be\xE1ll\xEDtva: keresked\u0151 (${opts.companyName}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  profile.command("show").description("Aktu\xE1lis elad\xF3i profil megjelen\xEDt\xE9se").action(async (_opts2, cmd) => {
+    try {
+      const result = await shopClient2.sellerProfile.get();
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else {
+        if (!result.sellerType) {
+          process.stdout.write("Elad\xF3i t\xEDpus m\xE9g nincs be\xE1ll\xEDtva.\nHaszn\xE1ld: haszno shop profile seller-type maganszemely\n");
+        } else {
+          process.stdout.write(`Elad\xF3i t\xEDpus: ${result.sellerType}
+`);
+          if (result.companyName) process.stdout.write(`  C\xE9g neve: ${result.companyName}
+`);
+          if (result.companyAddress) process.stdout.write(`  Sz\xE9khely: ${result.companyAddress}
+`);
+          if (result.companyRegNumber) process.stdout.write(`  C\xE9gjegyz\xE9k: ${result.companyRegNumber}
+`);
+          if (result.declaredAt) process.stdout.write(`  Be\xE1ll\xEDtva: ${result.declaredAt}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+}
+
 // src/index.ts
 var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.1.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
 function buildClient(opts) {
@@ -3175,7 +4691,9 @@ function argvFlag(name) {
   }
   return void 0;
 }
-var client = buildClient({ apiUrl: argvFlag("--api-url"), apiKey: argvFlag("--api-key") });
+var sharedOpts = { baseUrl: argvFlag("--api-url"), apiKey: argvFlag("--api-key") };
+var client = buildClient(sharedOpts);
+var shopClient = createShopClient(sharedOpts);
 registerCatalogCommands(program, client);
 registerProductsCommands(program, client);
 registerProposalsCommands(program, client);
@@ -3190,5 +4708,6 @@ registerBlogCommands(program, client);
 registerReportCommands(program, client);
 registerResearchCommands(program, client);
 registerActionsCommands(program, client);
+registerShopCommands(program, shopClient);
 program.parse();
 //# sourceMappingURL=index.js.map

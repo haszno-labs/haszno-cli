@@ -75,6 +75,82 @@ Ez elmenti az API kulcsot és az URL-t a `~/.config/haszno/config.json` fájlba.
 
 ---
 
+## Haszno Shop
+
+A `haszno shop` parancscsoporttal hirdetéseket adhatsz fel, kereshetsz és foglalhatsz le a Haszno másodpiacon. A Shop teljesen ingyenes — a feladás és a foglalás sem kerül pénzbe, a fizetés és az átadás közvetlenül a vevő és az eladó között zajlik.
+
+### Gyors kezdés
+
+```bash
+# 1. Bejelentkezés (token elmentése a ~/.config/haszno/config.json fájlba)
+haszno login
+
+# 2. Hirdetés feladása (AI kitölti a leírást a képek alapján)
+haszno shop post --from-photos --image ./foto1.jpg --price 15000
+
+# 3. Hirdetések keresése
+haszno shop search kerékpár --county Budapest --max-price 50000
+
+# 4. Hirdetés lefoglalása (ingyenes — a fizetés az eladóval zajlik)
+haszno shop reserve 42 --message "Érdeklődöm, lehet-e személyesen megnézni?"
+
+# 5. Foglalásaim megtekintése
+haszno shop reservations
+```
+
+### Shop parancsok áttekintése
+
+| Parancs | Leírás |
+|---|---|
+| `haszno login` | Bejelentkezés e-mail + jelszóval; token mentése |
+| `haszno logout` | Mentett token törlése |
+| `haszno whoami` | Aktuális felhasználó megjelenítése |
+| `haszno shop categories` | Kategóriák és kötelező attribútumok böngészése |
+| `haszno shop search [keresőszó]` | Hirdetések keresése (--category, --county, --min-price, …) |
+| `haszno shop show <id>` | Hirdetés részletei |
+| `haszno shop price-hint` | Ajánlott árhatárok egy kategóriához |
+| `haszno shop post` | Új hirdetés feladása (--title, --price, --image, --from-photos, …) |
+| `haszno shop my` | Saját hirdetések listája |
+| `haszno shop edit <id>` | Hirdetés szerkesztése |
+| `haszno shop pause <id>` | Hirdetés szüneteltetése |
+| `haszno shop activate <id>` | Szüneteltetett hirdetés aktiválása |
+| `haszno shop sold <id>` | Hirdetés eladottnak jelölése |
+| `haszno shop renew <id>` | Hirdetés megújítása |
+| `haszno shop delete <id>` | Hirdetés törlése |
+| `haszno shop inquiries` | Beérkezett üzenetek a hirdetéseimre |
+| `haszno shop inquire <adId>` | Üzenet küldése az eladónak |
+| `haszno shop favorite <adId>` | Hirdetés kedvencekhez adása |
+| `haszno shop unfavorite <adId>` | Hirdetés eltávolítása a kedvencekből |
+| `haszno shop favorites` | Kedvenc hirdetések listája |
+| `haszno shop reserve <adId>` | Hirdetés lefoglalása (ingyenes) |
+| `haszno shop reservations` | Foglalásaim listája |
+| `haszno shop reservation accept <id>` | Foglalás elfogadása (eladóként) |
+| `haszno shop reservation decline <id>` | Foglalás elutasítása (eladóként) |
+| `haszno shop reservation cancel <id>` | Foglalás lemondása (vevőként) |
+| `haszno shop reservation complete <id>` | Foglalás teljesítése (eladóként) |
+| `haszno shop reservation counter <id> --price <Ft>` | Ellenajánlat küldése (eladóként) |
+| `haszno shop reservation accept-counter <id>` | Ellenajánlat elfogadása (vevőként) |
+| `haszno shop reservation messages <id>` | Foglaláshoz tartozó üzenetek listája |
+| `haszno shop reservation message <id> --text <szöveg>` | Üzenet küldése a foglaláshoz |
+| `haszno shop reservation review <id> --rating <1-5>` | Értékelés leadása a foglaláshoz |
+| `haszno shop inquiry reply <id> --message <szöveg>` | Válasz küldése egy érdeklődőnek |
+| `haszno shop saved-search list` | Mentett keresések listázása |
+| `haszno shop saved-search add --name <név>` | Keresési feltétel mentése (--query, --category, …) |
+| `haszno shop saved-search remove <id>` | Mentett keresés törlése |
+| `haszno shop watch <adId>` | Hirdetés figyelése (ár-/státuszváltozás) |
+| `haszno shop unwatch <adId>` | Hirdetés figyelésének leállítása |
+| `haszno shop import-url <url>` | Hirdetés adatainak importálása egy URL-ről (AI-segítség) |
+| `haszno shop draft show` | Szerveren tárolt vázlat megjelenítése |
+| `haszno shop draft save` | Vázlat mentése (JSON stdin-ről) |
+| `haszno shop draft clear` | Vázlat törlése |
+| `haszno shop post --remove-bg` | Hirdetés feladása háttéreltávolítással |
+| `haszno shop post-bulk <forrás>` | Tömeges feladás CSV-ből vagy könyvtárból (--dry-run, --yes) |
+| `haszno tokens list` | Aktív API-tokenek listázása (session-hitelesítés) |
+| `haszno tokens revoke <id>` | API-token visszavonása (session-hitelesítés) |
+| `haszno logout` | Mentett token visszavonása a szerveren és törlése helyben |
+
+---
+
 ## Használat
 
 ```bash
