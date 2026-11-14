@@ -67,7 +67,6 @@ import type {
   AgentAction,
   ActionInput,
   ActionStatus,
-  AutopilotSettings,
 } from './types.js'
 
 export type { HttpOptions }
@@ -115,6 +114,29 @@ export class ShopTokenNotSupportedError extends Error {
         '(POST /api/agent/proposals) műveletekre jogosult.',
     )
     this.name = 'ShopTokenNotSupportedError'
+    this.operation = operation
+  }
+}
+
+/**
+ * Thrown when a legacy API key calls a manager (Napi jelentés / agent-actions) operation.
+ * These endpoints require a shop token (haszno_… prefix) sent as Bearer.
+ * Without a shop token the server either returns synthetic demo data (GET /api/agent/actions)
+ * or 401 for all other manager routes — both are wrong for a production agent.
+ * Zero HTTP calls are made when this error is thrown.
+ */
+export class LegacyKeyNotSupportedError extends Error {
+  readonly isLegacyKeyNotSupported = true
+  readonly operation: string
+
+  constructor(operation: string) {
+    super(
+      `"${operation}" csak bolt API-tokennel (haszno_…) érhető el — ` +
+        'a Napi jelentés és agent-parancsok nem működnek sima API-kulccsal. ' +
+        'Hozzon létre bolt API-tokent itt: /app/api-kulcsok (Haszno webalkalmazás). ' +
+        'Shop token required: create one at /app/api-kulcsok in the Haszno web app.',
+    )
+    this.name = 'LegacyKeyNotSupportedError'
     this.operation = operation
   }
 }
@@ -260,7 +282,6 @@ export interface HasznoClient {
     postFindings(day: string, body: FindingsInput): Promise<DailyReport>
     listActions(params?: { status?: ActionStatus; limit?: number }): Promise<AgentAction[]>
     proposeAction(body: ActionInput & { reason: string; reportItemId?: number }): Promise<AgentAction>
-    getAutopilot(): Promise<AutopilotSettings>
   }
 }
 
@@ -270,6 +291,13 @@ export interface HasznoClient {
 function notSupported(op: string): (..._args: unknown[]) => Promise<never> {
   return (..._args: unknown[]): Promise<never> => {
     return Promise.reject(new ShopTokenNotSupportedError(op))
+  }
+}
+
+/** Returns a function that rejects — legacy key cannot call manager endpoints. */
+function notSupportedLegacy(op: string): (..._args: unknown[]) => Promise<never> {
+  return (..._args: unknown[]): Promise<never> => {
+    return Promise.reject(new LegacyKeyNotSupportedError(op))
   }
 }
 
@@ -416,7 +444,6 @@ function createShopTokenClient(opts: HttpOptions): HasznoClient {
         return get(`/api/agent/actions${suffix}`, o)
       },
       proposeAction: (body: ActionInput & { reason: string; reportItemId?: number }) => post('/api/agent/actions', body, o),
-      getAutopilot: () => get('/api/agent/autopilot', o),
     },
   }
 }
@@ -589,23 +616,17 @@ function createLegacyClient(opts: HttpOptions): HasznoClient {
       get: (slug) => get(`/api/blog/${slug}`, o),
     },
 
+    // manager.* requires a shop token (haszno_…). In legacy mode these endpoints
+    // either return synthetic demo data (GET /api/agent/actions → HTTP 200 with
+    // fake rows) or 401. Both outcomes are wrong for a production agent.
     manager: {
-      listReports: () => get('/api/daily-reports', o),
-      // Agent-facing routes under /api/agent/ — Bearer tokens bypass the outer Basic-auth
-      // gate on Vercel and authenticate via the per-shop token handler (PR #108 on main).
-      getLatestReport: () => get('/api/agent/daily-report', o),
-      getReport: (day) => get(`/api/agent/daily-report/${day}`, o),
-      getResearchBrief: () => get('/api/agent/research-brief', o),
-      postFindings: (day, body) => post(`/api/agent/daily-report/${day}/findings`, body, o),
-      listActions: (params) => {
-        const qs = new URLSearchParams()
-        if (params?.status) qs.set('status', params.status)
-        if (params?.limit != null) qs.set('limit', String(params.limit))
-        const suffix = qs.toString() ? `?${qs.toString()}` : ''
-        return get(`/api/agent/actions${suffix}`, o)
-      },
-      proposeAction: (body) => post('/api/agent/actions', body, o),
-      getAutopilot: () => get('/api/agent/autopilot', o),
+      listReports: notSupportedLegacy('manager.listReports'),
+      getLatestReport: notSupportedLegacy('manager.getLatestReport'),
+      getReport: notSupportedLegacy('manager.getReport'),
+      getResearchBrief: notSupportedLegacy('manager.getResearchBrief'),
+      postFindings: notSupportedLegacy('manager.postFindings'),
+      listActions: notSupportedLegacy('manager.listActions'),
+      proposeAction: notSupportedLegacy('manager.proposeAction'),
     },
   }
 }

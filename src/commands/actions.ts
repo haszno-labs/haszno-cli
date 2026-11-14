@@ -237,10 +237,11 @@ export function registerActionsCommands(program: Command, client: HasznoClient):
         if (!productId) die('A --product-id kötelező az "ar" típushoz', 2)
         if (!price) die('A --price kötelező az "ar" típushoz', 2)
         const pid = parseInt(productId, 10)
-        const priceGross = parseFloat(price)
+        const priceNum = Number(price)
         if (isNaN(pid) || pid <= 0) die('Érvénytelen --product-id', 2)
-        if (isNaN(priceGross) || priceGross <= 0) die('Érvénytelen --price — pozitív számnak kell lennie', 2)
-        actionInput = { type: 'ar', productId: pid, priceGross }
+        if (!Number.isFinite(priceNum) || priceNum <= 0) die('Érvénytelen --price — pozitív egész szám szükséges (Ft)', 2)
+        if (!Number.isInteger(priceNum)) die('A --price értéknek egész számnak kell lennie (Ft, pl. 180000)', 2)
+        actionInput = { type: 'ar', productId: pid, priceGross: priceNum }
       } else {
         // import
         if (!networkProductId) die('A --network-product-id kötelező az "import" típushoz', 2)

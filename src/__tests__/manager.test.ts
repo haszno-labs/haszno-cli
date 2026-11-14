@@ -86,7 +86,7 @@ function makeBrief(overrides: Partial<ResearchBrief> = {}): ResearchBrief {
       'Milyen hatással lesz a GTA VI megjelenése a konzol-eladásokra?',
       'Várható-e PS5 Pro árcsökkentés az ünnepek előtt?',
     ],
-    postTo: '/api/daily-reports/2026-11-12/findings',
+    postTo: '/api/agent/daily-report/2026-11-12/findings',
     ...overrides,
   }
 }
@@ -154,7 +154,6 @@ function buildMockClient(): MockClient {
       postFindings: vi.fn(),
       listActions: vi.fn(),
       proposeAction: vi.fn(),
-      getAutopilot: vi.fn(),
     },
   } as unknown as MockClient
 }
@@ -492,6 +491,14 @@ describe('haszno actions propose', () => {
     ])
     expect(exitCode).toBe(2)
     expect(stderr).toContain('--price')
+  })
+
+  it('exits 2 when --price is a non-integer (float)', async () => {
+    const { exitCode, stderr } = await run(client, [
+      'actions', 'propose', '--type', 'ar', '--product-id', '1', '--price', '180000.5', '--reason', 'teszt indoklás itt',
+    ])
+    expect(exitCode).toBe(2)
+    expect(stderr).toMatch(/egész/)
   })
 
   it('exits 2 when --network-product-id is missing for import type', async () => {

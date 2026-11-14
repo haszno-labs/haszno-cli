@@ -152,6 +152,8 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 
 #### Haszno Manager — napi jelentés és agent-műveletek
 
+> **Requires a shop token** (`haszno_…`): these commands call the agent API (`/api/agent/*`) and do not work with a legacy API key — create a shop token at `/app/api-kulcsok` in the Haszno web app.
+
 | Command | Description |
 |---|---|
 | `haszno report [--day YYYY-MM-DD]` | Print the daily market report (latest by default) |
