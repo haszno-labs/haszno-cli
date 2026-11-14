@@ -58,6 +58,7 @@ import type {
   ShopReservationSimple,
   ShopSavedSearchFilters,
   ShopSellerProfileInput,
+  ShopPartnerProfileInput,
 } from '../client/shop.js'
 import { handleError, printJson } from './account.js'
 import { HasznoApiError } from '../client/index.js'
@@ -1486,6 +1487,181 @@ export function registerShopCommands(
             if (result.declaredAt) process.stdout.write(`  Beállítva: ${result.declaredAt}\n`)
           }
         }
+      } catch (err) { handleError(err) }
+    })
+
+  // ── partner ───────────────────────────────────────────────────────────────
+  // Partner-oldali profil és hirdetés-szindikáció.
+  // GET  /api/v1/shop/partner/profile      — read scope
+  // PUT  /api/v1/shop/partner/profile      — write scope
+  // GET  /api/v1/shop/partner/syndications — read scope
+  // PUT  /api/v1/shop/partner/syndications/:adId — write scope + kereskedo eladói típus
+  // DELETE /api/v1/shop/partner/syndications/:adId — write scope
+
+  const partner = shop
+    .command('partner')
+    .description('Partner profil és szindikációs beállítások')
+
+  const partnerProfile = partner
+    .command('profile')
+    .description('Partner profil megtekintése és szerkesztése')
+
+  partnerProfile
+    .command('show')
+    .description('Partner profil megjelenítése (GET /api/v1/shop/partner/profile) — hatókör: read')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const result = await shopClient.partner.getProfile()
+        if (getJsonFlag(cmd)) printJson(result)
+        else {
+          process.stdout.write(`Partner profil (refCode: ${result.refCode})\n`)
+          if (result.displayName) process.stdout.write(`  Megjelenítési név: ${result.displayName}\n`)
+          if (result.bio) process.stdout.write(`  Bemutatkozás: ${result.bio}\n`)
+          if (result.website) process.stdout.write(`  Weboldal: ${result.website}\n`)
+          process.stdout.write(`  Aktív szindikációk: ${result.activeSyndications}\n`)
+          process.stdout.write(`  Feed URL: https://haszno.com/api/v1/shop/partner/${result.refCode}/feed.json\n`)
+        }
+      } catch (err) { handleError(err) }
+    })
+
+  partnerProfile
+    .command('update')
+    .description('Partner profil frissítése (PUT /api/v1/shop/partner/profile) — hatókör: write')
+    .option('--display-name <név>', 'Megjelenítési név')
+    .option('--bio <szöveg>', 'Bemutatkozó szöveg')
+    .option('--logo-url <url>', 'Logó URL')
+    .option('--website <url>', 'Weboldal URL')
+    .action(async (opts: { displayName?: string; bio?: string; logoUrl?: string; website?: string }, cmd: Command) => {
+      const body: ShopPartnerProfileInput = {}
+      if (opts.displayName !== undefined) body.displayName = opts.displayName
+      if (opts.bio !== undefined) body.bio = opts.bio
+      if (opts.logoUrl !== undefined) body.logoUrl = opts.logoUrl
+      if (opts.website !== undefined) body.website = opts.website
+
+      if (Object.keys(body).length === 0) {
+        process.stderr.write('Legalább egy opciót adj meg: --display-name, --bio, --logo-url, --website\n')
+        process.exit(2)
+        return
+      }
+      try {
+        const result = await shopClient.partner.updateProfile(body)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Partner profil frissítve (refCode: ${result.refCode})\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  const partnerSyndications = partner
+    .command('syndications')
+    .description('Partnerként szindikált hirdetések kezelése')
+
+  partnerSyndications
+    .command('list')
+    .description('Szindikált hirdetések listája (GET /api/v1/shop/partner/syndications) — hatókör: read')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const items = await shopClient.partner.listSyndications()
+        if (getJsonFlag(cmd)) {
+          printJson(items)
+        } else {
+          if (items.length === 0) {
+            process.stdout.write('Nincs szindikált hirdetés.\n')
+            return
+          }
+          process.stdout.write(`Szindikált hirdetések (${items.length}):\n`)
+          for (const s of items) {
+            process.stdout.write(`  #${s.adId}  ${String(s.markupPct) + '%'.padStart(5)}  ${s.status.padEnd(10)}  ${s.adTitle}\n`)
+          }
+        }
+      } catch (err) { handleError(err) }
+    })
+
+  partnerSyndications
+    .command('upsert <adId>')
+    .description('Szindikáció létrehozása vagy frissítése (PUT /api/v1/shop/partner/syndications/:adId) — hatókör: write, kereskedő eladói típus szükséges')
+    .requiredOption('--markup-pct <pct>', 'Felár százaléka (pl. 10 = +10%)')
+    .action(async (adIdStr: string, opts: { markupPct: string }, cmd: Command) => {
+      const adId = parseInt(adIdStr, 10)
+      if (isNaN(adId) || adId <= 0) {
+        process.stderr.write('Érvénytelen hirdetés-azonosító.\n')
+        process.exit(2)
+        return
+      }
+      const markupPct = parseFloat(opts.markupPct)
+      if (isNaN(markupPct) || markupPct < 0) {
+        process.stderr.write('Érvénytelen felár: nem negatív számot adj meg.\n')
+        process.exit(2)
+        return
+      }
+      try {
+        const result = await shopClient.partner.upsertSyndication(adId, { markupPct })
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Szindikáció #${adId} mentve (felár: ${result.markupPct}%).\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  partnerSyndications
+    .command('remove <adId>')
+    .description('Szindikáció törlése (DELETE /api/v1/shop/partner/syndications/:adId) — hatókör: write')
+    .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
+      const adId = parseInt(adIdStr, 10)
+      if (isNaN(adId) || adId <= 0) {
+        process.stderr.write('Érvénytelen hirdetés-azonosító.\n')
+        process.exit(2)
+        return
+      }
+      try {
+        const result = await shopClient.partner.removeSyndication(adId)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Szindikáció #${adId} törölve.\n`)
+      } catch (err) { handleError(err) }
+    })
+
+  // ── moderation ────────────────────────────────────────────────────────────
+  // GET  /api/v1/shop/my/moderation         — read scope
+  // POST /api/v1/shop/my/moderation/:id/appeal — write scope
+
+  const moderation = shop
+    .command('moderation')
+    .description('Moderációs döntések megtekintése és fellebbezése')
+
+  moderation
+    .command('list')
+    .description('Moderációs döntések listája (GET /api/v1/shop/my/moderation) — hatókör: read')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const items = await shopClient.moderation.list()
+        if (getJsonFlag(cmd)) {
+          printJson(items)
+        } else {
+          if (items.length === 0) {
+            process.stdout.write('Nincs moderációs döntés.\n')
+            return
+          }
+          process.stdout.write(`Moderációs döntések (${items.length}):\n`)
+          for (const m of items) {
+            const status = m.decision === 'rejected' ? 'ELUTASÍTVA' : m.decision === 'approved' ? 'jóváhagyva' : m.decision
+            process.stdout.write(`  #${m.id}  hirdetés #${m.adId}  ${status.padEnd(12)}  ${m.adTitle}\n`)
+            if (m.reason) process.stdout.write(`         Ok: ${m.reason}\n`)
+          }
+        }
+      } catch (err) { handleError(err) }
+    })
+
+  moderation
+    .command('appeal <id>')
+    .description('Moderációs döntés elleni fellebbezés (POST /api/v1/shop/my/moderation/:id/appeal) — hatókör: write')
+    .option('--reason <szöveg>', 'Fellebbezés indoklása')
+    .action(async (idStr: string, opts: { reason?: string }, cmd: Command) => {
+      const id = parseInt(idStr, 10)
+      if (isNaN(id) || id <= 0) {
+        process.stderr.write('Érvénytelen moderáció-azonosító.\n')
+        process.exit(2)
+        return
+      }
+      try {
+        const result = await shopClient.moderation.appeal(id, opts.reason)
+        if (getJsonFlag(cmd)) printJson(result)
+        else process.stdout.write(`Fellebbezés benyújtva (#${result.id}).\n`)
       } catch (err) { handleError(err) }
     })
 }

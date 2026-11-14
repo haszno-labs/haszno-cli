@@ -208,6 +208,55 @@ export interface ShopSellerProfile {
   declaredAt: string | null
 }
 
+// ── Partner profile / syndications ───────────────────────────────────────────
+
+export interface ShopPartnerProfile {
+  refCode: string
+  displayName: string | null
+  bio: string | null
+  logoUrl: string | null
+  website: string | null
+  activeSyndications: number
+  createdAt: string
+}
+
+export interface ShopPartnerProfileInput {
+  displayName?: string
+  bio?: string
+  logoUrl?: string
+  website?: string
+}
+
+export interface ShopPartnerSyndication {
+  adId: number
+  adTitle: string
+  markupPct: number
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ShopPartnerSyndicationInput {
+  markupPct: number
+}
+
+// ── Moderation ────────────────────────────────────────────────────────────────
+
+export interface ShopModerationItem {
+  id: number
+  adId: number
+  adTitle: string
+  decision: 'approved' | 'rejected' | 'appealed' | string
+  reason: string | null
+  resolvedAt: string | null
+  createdAt: string
+}
+
+export interface ShopModerationAppealResult {
+  ok: boolean
+  id: number
+}
+
 export type ShopSellerProfileInput =
   | { sellerType: 'maganszemely' }
   | { sellerType: 'kereskedo'; companyName: string; companyAddress: string; companyRegNumber?: string | null }
@@ -471,6 +520,24 @@ export interface ShopHasznoClient {
     get(): Promise<ShopSellerProfile>
     set(body: ShopSellerProfileInput): Promise<ShopSellerProfile>
   }
+  partner: {
+    /** GET /api/v1/shop/partner/profile — scope: read */
+    getProfile(): Promise<ShopPartnerProfile>
+    /** PUT /api/v1/shop/partner/profile — scope: write */
+    updateProfile(body: ShopPartnerProfileInput): Promise<ShopPartnerProfile>
+    /** GET /api/v1/shop/partner/syndications — scope: read */
+    listSyndications(): Promise<ShopPartnerSyndication[]>
+    /** PUT /api/v1/shop/partner/syndications/:adId — scope: write, requires kereskedo seller type */
+    upsertSyndication(adId: number, body: ShopPartnerSyndicationInput): Promise<ShopPartnerSyndication>
+    /** DELETE /api/v1/shop/partner/syndications/:adId — scope: write */
+    removeSyndication(adId: number): Promise<{ ok: boolean }>
+  }
+  moderation: {
+    /** GET /api/v1/shop/my/moderation — scope: read */
+    list(): Promise<ShopModerationItem[]>
+    /** POST /api/v1/shop/my/moderation/:id/appeal — scope: write */
+    appeal(id: number, reason?: string): Promise<ShopModerationAppealResult>
+  }
 }
 
 const SORT_MAP: Record<string, string> = {
@@ -622,6 +689,19 @@ export function createShopClient(opts: HttpOptions): ShopHasznoClient {
     sellerProfile: {
       get: () => get('/api/v1/shop/my/seller-profile', o),
       set: (body) => put('/api/v1/shop/my/seller-profile', body, o),
+    },
+
+    partner: {
+      getProfile: () => get('/api/v1/shop/partner/profile', o),
+      updateProfile: (body) => put('/api/v1/shop/partner/profile', body, o),
+      listSyndications: () => get('/api/v1/shop/partner/syndications', o),
+      upsertSyndication: (adId, body) => put(`/api/v1/shop/partner/syndications/${adId}`, body, o),
+      removeSyndication: (adId) => del(`/api/v1/shop/partner/syndications/${adId}`, o),
+    },
+
+    moderation: {
+      list: () => get('/api/v1/shop/my/moderation', o),
+      appeal: (id, reason) => post(`/api/v1/shop/my/moderation/${id}/appeal`, reason !== undefined ? { reason } : {}, o),
     },
   }
 }
