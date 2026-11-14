@@ -178,6 +178,30 @@ haszno rules run 2 --yes
 
 # JSON output for scripting
 haszno products list --json | jq '.[] | .name'
+
+# Daily market report (latest)
+haszno report
+
+# Daily report for a specific day
+haszno report --day 2026-11-10
+
+# Research brief — fókusz-termékek és kutatási kérdések AI ügynöknek
+haszno research brief
+
+# Post research findings from a JSON file
+haszno research post findings.json
+
+# Post findings from stdin (pipe from an agent)
+cat findings.json | haszno research post -
+
+# List agent actions (default: all, limit 50)
+haszno actions list
+haszno actions list --status javasolt
+
+# Propose a new action (approval happens in the web UI)
+haszno actions propose --type ar --product-id 42 --price 180000 --reason "Piaci áremelkedés"
+haszno actions propose --type felvetel --product-id 55 --reason "Trending termék"
+haszno actions propose --type import --network-product-id 99 --reason "Jó margin"
 ```
 
 ### Global flags
@@ -257,6 +281,32 @@ haszno account me --json
 - `me` — subset of `/api/v1/auth/me` response (name, email, shopName, tokenScope)
 - `availableCommandGroups` — list of command groups that work with the current credential
 - `blockedForShopToken` — operations that return 403 for Bearer tokens (approve/reject/rollback, rules, feeds, settings, import-list, billing)
+
+#### Haszno Manager — napi jelentés és agent-műveletek
+
+> **Requires a shop token** (`haszno_…`): these commands call the agent API (`/api/agent/*`) and do not work with a legacy API key — create a shop token at `/app/api-kulcsok` in the Haszno web app.
+
+| Command | Description |
+|---|---|
+| `haszno report [--day YYYY-MM-DD]` | Print the daily market report (latest by default) |
+| `haszno research brief` | Fetch the research brief for today (focus products + questions for the agent) |
+| `haszno research post <file\|->` | Post `FindingsInput` JSON from a file or stdin; `--day YYYY-MM-DD` to target a specific day |
+| `haszno actions list [--status <s>] [--limit <n>]` | List agent actions (newest first) |
+| `haszno actions propose --type <type> … --reason <text>` | Propose a new agent action; approval happens in the web UI at `/app` |
+
+**`haszno actions propose` flags:**
+
+| Flag | Required for | Description |
+|---|---|---|
+| `--type <type>` | always | `felvetel` / `levetel` / `ar` / `import` |
+| `--product-id <id>` | felvetel, levetel, ar | Product ID |
+| `--network-product-id <id>` | import | Network product ID |
+| `--price <gross>` | ar | New gross price in HUF |
+| `--reason <text>` | always | Justification (5–500 characters) |
+| `--report-item <id>` | — | Optional: link to a report item |
+
+> **Note:** Approving and undoing actions is intentionally NOT available in the CLI.
+> These are human-only operations and must be done in the web UI at `/app`.
 
 ---
 
