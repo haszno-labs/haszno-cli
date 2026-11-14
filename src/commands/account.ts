@@ -69,9 +69,25 @@ export function printKv(rows: Array<[string, string | number | boolean]>): void 
 
 // ── Error handling ───────────────────────────────────────────────────────────
 
+/** Map well-known API error codes to a one-line next-step hint (Hungarian). */
+function nextStepHint(status: number, code?: string): string | undefined {
+  if (status === 401 || code === 'unauthenticated') return 'Futtasd: haszno login'
+  if (status === 403 || code === 'forbidden') return 'Ellenőrizd a token hatókörét (read/write) és a bolt-token korlátozásait.'
+  if (status === 404 || code === 'not_found') return 'Ellenőrizd az azonosítót.'
+  if (status === 409 || code === 'conflict') return 'Ismételt nonce: kérj új azonosítót (randomUUID), vagy keresd a GET listában az eredeti bejegyzést.'
+  if (status === 422 || code === 'unprocessable') return 'Ellenőrizd az árszintet: a javasolt ár nem lehet az ár-minimum alatt.'
+  if (status === 429 || code === 'rate_limited') return 'Túl sok kérés — várj egy percet és próbáld újra.'
+  return undefined
+}
+
 export function handleError(err: unknown): never {
   if (err instanceof HasznoApiError) {
-    process.stderr.write(`Hiba: ${err.message} (HTTP ${err.status})\n`)
+    let msg = `Hiba: ${err.message} (HTTP ${err.status})`
+    if (err.code) msg += `  [code: ${err.code}]`
+    if (err.requestId) msg += `  [requestId: ${err.requestId}]`
+    process.stderr.write(msg + '\n')
+    const hint = nextStepHint(err.status, err.code)
+    if (hint) process.stderr.write(`  → ${hint}\n`)
   } else if (err instanceof Error) {
     process.stderr.write(`Hiba: ${err.message}\n`)
   } else {
@@ -354,25 +370,59 @@ export function registerAccountCommands(
   // whoami ───────────────────────────────────────────────────────────────────
   account
     .command('whoami')
-    .description('Azonosítás és beállítások összefoglalója / identity + settings summary')
+    .description('Azonosítás összefoglalója — bolt-tokennel /api/v1/auth/me-t hív, egyéb hitelesítésnél az API beállításait kéri le')
     .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      // Detect credential mode so we route to the right endpoint
+      const { resolveConnection } = await import('../client/config.js')
+      const { isShopToken } = await import('../client/http.js')
+      const conn = resolveConnection(httpOpts, process.env)
+      const isShop = isShopToken(conn.apiKey)
+
       try {
-        const [health, settings] = await Promise.all([
-          client.health.check(),
-          client.settings.get(),
-        ])
-        if (getJsonFlag(cmd)) {
-          printJson({ health, settings })
+        if (isShop) {
+          // Shop-token path: call /api/v1/auth/me (always available for Bearer)
+          const { get: httpGet } = await import('../client/http.js')
+          const me = await httpGet<{
+            id: number; email: string; name: string; shopId: number;
+            shopName: string; founderSince: string; role: string; tokenScope: string
+          }>('/api/v1/auth/me', httpOpts)
+          if (getJsonFlag(cmd)) {
+            printJson(me)
+          } else {
+            process.stdout.write('Azonosítás (bolt-token):\n')
+            printKv([
+              ['Felhasználó:', me.name],
+              ['E-mail:', me.email],
+              ['Bolt:', me.shopName],
+              ['Token hatókör:', me.tokenScope],
+              ['Szerepkör:', me.role],
+            ])
+            process.stdout.write('\nElérhető parancscsoportok ebben a módban:\n')
+            process.stdout.write('  haszno products   haszno orders   haszno proposals list/propose\n')
+            process.stdout.write('  haszno shop       haszno account me / doctor\n')
+            if (me.tokenScope === 'read') {
+              process.stdout.write('\nFigyelmeztetés: csak olvasási token — haszno proposals propose és write műveletek 403-at adnak.\n')
+            }
+          }
         } else {
-          process.stdout.write('Kapcsolat:\n')
-          printKv([['API:', health.ok ? 'OK' : 'HIBA']])
-          process.stdout.write('\nArazasi beallitasok:\n')
-          printKv([
-            ['Alacınzas (undercutPct):', `${settings.undercutPct}%`],
-            ['Min. haszon (minMarginPct):', `${settings.minMarginPct}%`],
-            ['AFA (vatPct):', `${settings.vatPct}%`],
-            ['Automatizmus:', settings.automationPaused ? 'szunet' : 'aktiv'],
+          // Legacy path: health + settings
+          const [health, settings] = await Promise.all([
+            client.health.check(),
+            client.settings.get(),
           ])
+          if (getJsonFlag(cmd)) {
+            printJson({ health, settings })
+          } else {
+            process.stdout.write('Kapcsolat:\n')
+            printKv([['API:', health.ok ? 'OK' : 'HIBA']])
+            process.stdout.write('\nArazasi beallitasok:\n')
+            printKv([
+              ['Alacınzas (undercutPct):', `${settings.undercutPct}%`],
+              ['Min. haszon (minMarginPct):', `${settings.minMarginPct}%`],
+              ['AFA (vatPct):', `${settings.vatPct}%`],
+              ['Automatizmus:', settings.automationPaused ? 'szunet' : 'aktiv'],
+            ])
+          }
         }
       } catch (err) {
         handleError(err)
@@ -557,6 +607,93 @@ export function registerAccountCommands(
         }
       } catch (err) {
         handleError(err)
+      }
+    })
+
+  // me ───────────────────────────────────────────────────────────────────────
+  account
+    .command('me')
+    .description('Azonosítási adatok lekérése a szerverről (GET /api/v1/auth/me) — bolt-token és egyéb hitelesítési módokkal egyaránt működik')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      try {
+        const { get: httpGet } = await import('../client/http.js')
+        const me = await httpGet<{
+          id: number; email: string; name: string; shopId: number;
+          shopName: string; founderSince: string; role: string; tokenScope?: string
+        }>('/api/v1/auth/me', httpOpts)
+        if (getJsonFlag(cmd)) {
+          printJson(me)
+        } else {
+          process.stdout.write('Azonosítás:\n')
+          const rows: Array<[string, string | number | boolean]> = [
+            ['Felhasználó:', me.name],
+            ['E-mail:', me.email],
+            ['Bolt:', me.shopName],
+            ['ShopID:', me.shopId],
+            ['Szerepkör:', me.role],
+          ]
+          if (me.tokenScope) rows.push(['Token hatókör:', me.tokenScope])
+          printKv(rows)
+        }
+      } catch (err) {
+        handleError(err)
+      }
+    })
+
+  // doctor ──────────────────────────────────────────────────────────────────
+  account
+    .command('doctor')
+    .description('Hitelesítési mód, token hatókör és elérhető parancsok ellenőrzése')
+    .action(async (_opts: Record<string, unknown>, cmd: Command) => {
+      const { resolveConnection } = await import('../client/config.js')
+      const { isShopToken } = await import('../client/http.js')
+      const conn = resolveConnection(httpOpts, process.env)
+      const isShop = isShopToken(conn.apiKey)
+      const credentialMode = isShop ? 'shop-token (Bearer)' : conn.apiKey ? 'api-key (x-api-key)' : conn.basicAuth ? 'Basic' : 'nincs hitelesítés'
+
+      let apiOk = false
+      let me: { email?: string; name?: string; shopName?: string; shopId?: number; tokenScope?: string } = {}
+      let apiError: string | undefined
+      try {
+        const { get: httpGet } = await import('../client/http.js')
+        me = await httpGet<typeof me>('/api/v1/auth/me', httpOpts)
+        apiOk = true
+      } catch (err) {
+        apiError = err instanceof Error ? err.message : String(err)
+      }
+
+      const groups = isShop
+        ? ['products (read)', 'orders (read)', 'proposals list/propose', 'shop (scope-gated)', 'account me/doctor']
+        : ['products', 'orders', 'proposals (all)', 'shop', 'account', 'rules', 'feeds', 'settings', 'catalogue']
+      const blocked = isShop
+        ? ['proposals approve/reject/rollback', 'rules', 'feeds', 'settings', 'import-list', 'billing']
+        : []
+
+      const data = {
+        credentialMode,
+        apiOk,
+        apiError: apiError ?? null,
+        me,
+        availableCommandGroups: groups,
+        blockedForShopToken: blocked,
+      }
+
+      if (getJsonFlag(cmd)) {
+        printJson(data)
+      } else {
+        process.stdout.write(`Hitelesítési mód: ${credentialMode}\n`)
+        process.stdout.write(`API kapcsolat:   ${apiOk ? 'OK' : `HIBA — ${apiError ?? 'ismeretlen'}`}\n`)
+        if (me.name) process.stdout.write(`Felhasználó:     ${me.name}${me.shopName ? ` (${me.shopName})` : ''}\n`)
+        if (me.tokenScope) process.stdout.write(`Token hatókör:   ${me.tokenScope}\n`)
+        process.stdout.write('\nElérhető parancscsoportok:\n')
+        for (const g of groups) process.stdout.write(`  ✓ haszno ${g}\n`)
+        if (blocked.length > 0) {
+          process.stdout.write('\nLetiltott (bolt-token korlátozás):\n')
+          for (const b of blocked) process.stdout.write(`  ✗ ${b}\n`)
+        }
+        if (!apiOk) {
+          process.stdout.write('\nTipp: futtasd a `haszno login` parancsot a hitelesítés megújításához.\n')
+        }
       }
     })
 
