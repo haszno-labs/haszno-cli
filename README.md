@@ -144,6 +144,13 @@ haszno shop reservations
 | `haszno shop draft clear` | Delete draft |
 | `haszno shop post --remove-bg` | Post ad with AI background removal on images |
 | `haszno shop post-bulk <source>` | Bulk post from CSV or photo directory (--dry-run, --yes) |
+| `haszno shop partner profile show` | Show partner profile (refCode, feed URL) |
+| `haszno shop partner profile update` | Update partner profile (--display-name, --bio, --website) |
+| `haszno shop partner syndications list` | List syndicated partner ads |
+| `haszno shop partner syndications upsert <adId> --markup-pct <pct>` | Upsert a syndication (requires kereskedo seller type) |
+| `haszno shop partner syndications remove <adId>` | Remove a syndication |
+| `haszno shop moderation list` | List moderation decisions on your ads |
+| `haszno shop moderation appeal <id>` | Appeal a moderation decision (--reason) |
 | `haszno tokens list` | List active API tokens (session auth required) |
 | `haszno tokens revoke <id>` | Revoke an API token (session auth required) |
 | `haszno logout` | Revoke token server-side and remove from local config |
@@ -187,6 +194,9 @@ haszno products list --json | jq '.[] | .name'
 |---|---|---|
 | `haszno login` | both | Authenticate and save config |
 | `haszno account ping` | both | Check API connection |
+| `haszno account me` | both | Fetch identity from `/api/v1/auth/me` (name, email, shopId, tokenScope) |
+| `haszno account whoami` | both | Identity + settings; shop-token mode calls `/api/v1/auth/me` automatically |
+| `haszno account doctor` | both | Show credential mode, token scope, and available/blocked command groups |
 | `haszno account stats` | legacy | Dashboard summary |
 | `haszno account impact` | legacy | Profit impact meter |
 | `haszno products list` | both | List products |
@@ -201,6 +211,52 @@ haszno products list --json | jq '.[] | .name'
 | `haszno feeds import-supplier ...` | legacy | Import supplier feed |
 | `haszno ideas list` | legacy | AI product ideas |
 | `haszno orders list` | both | List orders |
+| `haszno shop partner profile show` | both | Partner profile (refCode, feed URL) |
+| `haszno shop partner profile update` | both (write) | Update partner profile |
+| `haszno shop partner syndications list` | both | List syndicated partner ads |
+| `haszno shop partner syndications upsert <adId>` | both (write) | Upsert syndication markup |
+| `haszno shop partner syndications remove <adId>` | both (write) | Remove syndication |
+| `haszno shop moderation list` | both | List moderation decisions |
+| `haszno shop moderation appeal <id>` | both (write) | Appeal a moderation decision |
+
+---
+
+## Agent ergonomics
+
+### Error output for agents and swarms
+
+Every API error is written to **stderr** and exits with a non-zero code:
+
+| Exit code | Meaning |
+|---|---|
+| 1 | API error (401, 403, 404, 409, 422, 429, 5xx) |
+| 2 | Input validation error (bad flag value, missing required option) |
+
+Error lines include the HTTP status, the machine-readable `code` field from the API envelope, and the `requestId` for support correlation:
+
+```
+Hiba: Hitelesítés szükséges (HTTP 401)  [code: unauthenticated]  [requestId: req-abc123]
+  → Futtasd: haszno login
+```
+
+Pass `--json` for stable machine-readable output on **stdout** (`{ "error": "...", "code": "...", "requestId": "..." }` is never mixed into stdout — errors are always on stderr).
+
+### Verifying credentials and token scope
+
+```bash
+# Show credential mode, token scope, available/blocked command groups
+haszno account doctor --json
+
+# Fetch identity live from the server
+haszno account me --json
+```
+
+`haszno account doctor` returns a JSON object with:
+- `credentialMode` — `"shop-token (Bearer)"`, `"api-key (x-api-key)"`, `"Basic"`, or `"nincs hitelesítés"`
+- `apiOk` — `true` / `false`
+- `me` — subset of `/api/v1/auth/me` response (name, email, shopName, tokenScope)
+- `availableCommandGroups` — list of command groups that work with the current credential
+- `blockedForShopToken` — operations that return 403 for Bearer tokens (approve/reject/rollback, rules, feeds, settings, import-list, billing)
 
 ---
 
