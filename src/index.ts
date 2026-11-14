@@ -38,7 +38,7 @@ import { createShopClient } from './client/shop.js'
 const program = new Command()
   .name('haszno')
   .description('Haszno dropshipping CLI')
-  .version('0.1.0')
+  .version('0.4.0')
   .option('--json', 'output machine-readable JSON')
   .option('--api-url <url>', 'Haszno API base URL (overrides HASZNO_API_URL)')
   .option('--api-key <key>', 'Haszno API key (overrides HASZNO_API_KEY)')
