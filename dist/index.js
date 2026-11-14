@@ -1798,7 +1798,7 @@ import { createInterface as createInterface3 } from "readline";
 
 // src/client/shop.ts
 import { readFileSync } from "fs";
-var CLI_VERSION = "0.3.0";
+var CLI_VERSION = "0.4.0";
 async function uploadShopImage(filePath, opts) {
   const conn = resolveConnection(opts, process.env, opts.readConfig);
   const fetchFn = opts.fetch ?? fetch;
@@ -2003,7 +2003,7 @@ function createShopClient(opts) {
     },
     moderation: {
       list: () => get("/api/v1/shop/my/moderation", o),
-      appeal: (id, reason) => post(`/api/v1/shop/my/moderation/${id}/appeal`, reason !== void 0 ? { reason } : {}, o)
+      appeal: (id, message) => post(`/api/v1/shop/my/moderation/${id}/appeal`, { message }, o)
     }
   };
 }
@@ -4268,27 +4268,22 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
 `);
         if (result.displayName) process.stdout.write(`  Megjelen\xEDt\xE9si n\xE9v: ${result.displayName}
 `);
-        if (result.bio) process.stdout.write(`  Bemutatkoz\xE1s: ${result.bio}
+        process.stdout.write(`  Feed JSON: https://haszno.com${result.feedJsonUrl}
 `);
-        if (result.website) process.stdout.write(`  Weboldal: ${result.website}
+        process.stdout.write(`  Feed XML:  https://haszno.com${result.feedXmlUrl}
 `);
-        process.stdout.write(`  Akt\xEDv szindik\xE1ci\xF3k: ${result.activeSyndications}
-`);
-        process.stdout.write(`  Feed URL: https://haszno.com/api/v1/shop/partner/${result.refCode}/feed.json
+        process.stdout.write(`  Be\xE1gyaz\xE1s: https://haszno.com${result.embedUrl}
 `);
       }
     } catch (err) {
       handleError2(err);
     }
   });
-  partnerProfile.command("update").description("Partner profil friss\xEDt\xE9se (PUT /api/v1/shop/partner/profile) \u2014 hat\xF3k\xF6r: write").option("--display-name <n\xE9v>", "Megjelen\xEDt\xE9si n\xE9v").option("--bio <sz\xF6veg>", "Bemutatkoz\xF3 sz\xF6veg").option("--logo-url <url>", "Log\xF3 URL").option("--website <url>", "Weboldal URL").action(async (opts, cmd) => {
+  partnerProfile.command("update").description("Partner profil friss\xEDt\xE9se (PUT /api/v1/shop/partner/profile) \u2014 hat\xF3k\xF6r: write; csak a megjelen\xEDt\xE9si n\xE9v m\xF3dos\xEDthat\xF3").option("--display-name <n\xE9v>", "Megjelen\xEDt\xE9si n\xE9v (min 2, max 60 karakter)").action(async (opts, cmd) => {
     const body = {};
     if (opts.displayName !== void 0) body.displayName = opts.displayName;
-    if (opts.bio !== void 0) body.bio = opts.bio;
-    if (opts.logoUrl !== void 0) body.logoUrl = opts.logoUrl;
-    if (opts.website !== void 0) body.website = opts.website;
     if (Object.keys(body).length === 0) {
-      process.stderr.write("Legal\xE1bb egy opci\xF3t adj meg: --display-name, --bio, --logo-url, --website\n");
+      process.stderr.write("Legal\xE1bb egy opci\xF3t adj meg: --display-name\n");
       process.exit(2);
       return;
     }
@@ -4315,7 +4310,8 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
         process.stdout.write(`Szindik\xE1lt hirdet\xE9sek (${items.length}):
 `);
         for (const s of items) {
-          process.stdout.write(`  #${s.adId}  ${String(s.markupPct) + "%".padStart(5)}  ${s.status.padEnd(10)}  ${s.adTitle}
+          const liveStr = s.live ? "akt\xEDv    " : "inakt\xEDv  ";
+          process.stdout.write(`  #${s.ad.id}  ${(String(s.markupPct) + "%").padStart(5)}  ${liveStr}  ${s.ad.title}
 `);
         }
       }
@@ -4323,7 +4319,7 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
       handleError2(err);
     }
   });
-  partnerSyndications.command("upsert <adId>").description("Szindik\xE1ci\xF3 l\xE9trehoz\xE1sa vagy friss\xEDt\xE9se (PUT /api/v1/shop/partner/syndications/:adId) \u2014 hat\xF3k\xF6r: write, keresked\u0151 elad\xF3i t\xEDpus sz\xFCks\xE9ges").requiredOption("--markup-pct <pct>", "Fel\xE1r sz\xE1zal\xE9ka (pl. 10 = +10%)").action(async (adIdStr, opts, cmd) => {
+  partnerSyndications.command("upsert <adId>").description("Szindik\xE1ci\xF3 l\xE9trehoz\xE1sa vagy friss\xEDt\xE9se (PUT /api/v1/shop/partner/syndications/:adId) \u2014 hat\xF3k\xF6r: write, keresked\u0151 elad\xF3i t\xEDpus sz\xFCks\xE9ges").requiredOption("--markup-pct <pct>", "Fel\xE1r sz\xE1zal\xE9ka (pl. 10 = +10%)").requiredOption("--markup-ft <ft>", "Fix fel\xE1r Ft-ban (0\u201350 000 000)").action(async (adIdStr, opts, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId) || adId <= 0) {
       process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
@@ -4336,10 +4332,16 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
       process.exit(2);
       return;
     }
+    const markupFt = parseInt(opts.markupFt, 10);
+    if (isNaN(markupFt) || markupFt < 0 || markupFt > 5e7) {
+      process.stderr.write("\xC9rv\xE9nytelen fix fel\xE1r: 0 \xE9s 50 000 000 k\xF6z\xF6tti eg\xE9sz sz\xE1mot adj meg.\n");
+      process.exit(2);
+      return;
+    }
     try {
-      const result = await shopClient2.partner.upsertSyndication(adId, { markupPct });
+      const result = await shopClient2.partner.upsertSyndication(adId, { markupPct, markupFt });
       if (getJsonFlag2(cmd)) printJson3(result);
-      else process.stdout.write(`Szindik\xE1ci\xF3 #${adId} mentve (fel\xE1r: ${result.markupPct}%).
+      else process.stdout.write(`Szindik\xE1ci\xF3 #${adId} mentve (fel\xE1r: ${result.markupPct}%, fix: ${result.markupFt} Ft).
 `);
     } catch (err) {
       handleError2(err);
@@ -4375,10 +4377,11 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
         process.stdout.write(`Moder\xE1ci\xF3s d\xF6nt\xE9sek (${items.length}):
 `);
         for (const m of items) {
-          const status = m.decision === "rejected" ? "ELUTAS\xCDTVA" : m.decision === "approved" ? "j\xF3v\xE1hagyva" : m.decision;
-          process.stdout.write(`  #${m.id}  hirdet\xE9s #${m.adId}  ${status.padEnd(12)}  ${m.adTitle}
+          process.stdout.write(`  #${m.id}  hirdet\xE9s #${m.adId}  ${m.action.padEnd(16)}  ${m.reasonCode}
 `);
-          if (m.reason) process.stdout.write(`         Ok: ${m.reason}
+          if (m.reasonNote) process.stdout.write(`         Megjegyz\xE9s: ${m.reasonNote}
+`);
+          if (m.appeal) process.stdout.write(`         Fellebbez\xE9s: ${m.appeal.status}
 `);
         }
       }
@@ -4386,15 +4389,20 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
       handleError2(err);
     }
   });
-  moderation.command("appeal <id>").description("Moder\xE1ci\xF3s d\xF6nt\xE9s elleni fellebbez\xE9s (POST /api/v1/shop/my/moderation/:id/appeal) \u2014 hat\xF3k\xF6r: write").option("--reason <sz\xF6veg>", "Fellebbez\xE9s indokl\xE1sa").action(async (idStr, opts, cmd) => {
+  moderation.command("appeal <id>").description("Moder\xE1ci\xF3s d\xF6nt\xE9s elleni fellebbez\xE9s (POST /api/v1/shop/my/moderation/:id/appeal) \u2014 hat\xF3k\xF6r: write; az \xFCzenet min. 10 karakter").requiredOption("--message <sz\xF6veg>", "Fellebbez\xE9s sz\xF6vege (min. 10, max. 2000 karakter)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id) || id <= 0) {
       process.stderr.write("\xC9rv\xE9nytelen moder\xE1ci\xF3-azonos\xEDt\xF3.\n");
       process.exit(2);
       return;
     }
+    if (opts.message.length < 10) {
+      process.stderr.write("Az \xFCzenet legal\xE1bb 10 karakter kell legyen.\n");
+      process.exit(2);
+      return;
+    }
     try {
-      const result = await shopClient2.moderation.appeal(id, opts.reason);
+      const result = await shopClient2.moderation.appeal(id, opts.message);
       if (getJsonFlag2(cmd)) printJson3(result);
       else process.stdout.write(`Fellebbez\xE9s beny\xFAjtva (#${result.id}).
 `);

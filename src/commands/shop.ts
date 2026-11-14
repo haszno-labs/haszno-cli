@@ -1516,30 +1516,23 @@ export function registerShopCommands(
         else {
           process.stdout.write(`Partner profil (refCode: ${result.refCode})\n`)
           if (result.displayName) process.stdout.write(`  Megjelenítési név: ${result.displayName}\n`)
-          if (result.bio) process.stdout.write(`  Bemutatkozás: ${result.bio}\n`)
-          if (result.website) process.stdout.write(`  Weboldal: ${result.website}\n`)
-          process.stdout.write(`  Aktív szindikációk: ${result.activeSyndications}\n`)
-          process.stdout.write(`  Feed URL: https://haszno.com/api/v1/shop/partner/${result.refCode}/feed.json\n`)
+          process.stdout.write(`  Feed JSON: https://haszno.com${result.feedJsonUrl}\n`)
+          process.stdout.write(`  Feed XML:  https://haszno.com${result.feedXmlUrl}\n`)
+          process.stdout.write(`  Beágyazás: https://haszno.com${result.embedUrl}\n`)
         }
       } catch (err) { handleError(err) }
     })
 
   partnerProfile
     .command('update')
-    .description('Partner profil frissítése (PUT /api/v1/shop/partner/profile) — hatókör: write')
-    .option('--display-name <név>', 'Megjelenítési név')
-    .option('--bio <szöveg>', 'Bemutatkozó szöveg')
-    .option('--logo-url <url>', 'Logó URL')
-    .option('--website <url>', 'Weboldal URL')
-    .action(async (opts: { displayName?: string; bio?: string; logoUrl?: string; website?: string }, cmd: Command) => {
+    .description('Partner profil frissítése (PUT /api/v1/shop/partner/profile) — hatókör: write; csak a megjelenítési név módosítható')
+    .option('--display-name <név>', 'Megjelenítési név (min 2, max 60 karakter)')
+    .action(async (opts: { displayName?: string }, cmd: Command) => {
       const body: ShopPartnerProfileInput = {}
       if (opts.displayName !== undefined) body.displayName = opts.displayName
-      if (opts.bio !== undefined) body.bio = opts.bio
-      if (opts.logoUrl !== undefined) body.logoUrl = opts.logoUrl
-      if (opts.website !== undefined) body.website = opts.website
 
       if (Object.keys(body).length === 0) {
-        process.stderr.write('Legalább egy opciót adj meg: --display-name, --bio, --logo-url, --website\n')
+        process.stderr.write('Legalább egy opciót adj meg: --display-name\n')
         process.exit(2)
         return
       }
@@ -1569,7 +1562,8 @@ export function registerShopCommands(
           }
           process.stdout.write(`Szindikált hirdetések (${items.length}):\n`)
           for (const s of items) {
-            process.stdout.write(`  #${s.adId}  ${String(s.markupPct) + '%'.padStart(5)}  ${s.status.padEnd(10)}  ${s.adTitle}\n`)
+            const liveStr = s.live ? 'aktív    ' : 'inaktív  '
+            process.stdout.write(`  #${s.ad.id}  ${(String(s.markupPct) + '%').padStart(5)}  ${liveStr}  ${s.ad.title}\n`)
           }
         }
       } catch (err) { handleError(err) }
@@ -1579,7 +1573,8 @@ export function registerShopCommands(
     .command('upsert <adId>')
     .description('Szindikáció létrehozása vagy frissítése (PUT /api/v1/shop/partner/syndications/:adId) — hatókör: write, kereskedő eladói típus szükséges')
     .requiredOption('--markup-pct <pct>', 'Felár százaléka (pl. 10 = +10%)')
-    .action(async (adIdStr: string, opts: { markupPct: string }, cmd: Command) => {
+    .requiredOption('--markup-ft <ft>', 'Fix felár Ft-ban (0–50 000 000)')
+    .action(async (adIdStr: string, opts: { markupPct: string; markupFt: string }, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
       if (isNaN(adId) || adId <= 0) {
         process.stderr.write('Érvénytelen hirdetés-azonosító.\n')
@@ -1592,10 +1587,16 @@ export function registerShopCommands(
         process.exit(2)
         return
       }
+      const markupFt = parseInt(opts.markupFt, 10)
+      if (isNaN(markupFt) || markupFt < 0 || markupFt > 50_000_000) {
+        process.stderr.write('Érvénytelen fix felár: 0 és 50 000 000 közötti egész számot adj meg.\n')
+        process.exit(2)
+        return
+      }
       try {
-        const result = await shopClient.partner.upsertSyndication(adId, { markupPct })
+        const result = await shopClient.partner.upsertSyndication(adId, { markupPct, markupFt })
         if (getJsonFlag(cmd)) printJson(result)
-        else process.stdout.write(`Szindikáció #${adId} mentve (felár: ${result.markupPct}%).\n`)
+        else process.stdout.write(`Szindikáció #${adId} mentve (felár: ${result.markupPct}%, fix: ${result.markupFt} Ft).\n`)
       } catch (err) { handleError(err) }
     })
 
@@ -1639,9 +1640,9 @@ export function registerShopCommands(
           }
           process.stdout.write(`Moderációs döntések (${items.length}):\n`)
           for (const m of items) {
-            const status = m.decision === 'rejected' ? 'ELUTASÍTVA' : m.decision === 'approved' ? 'jóváhagyva' : m.decision
-            process.stdout.write(`  #${m.id}  hirdetés #${m.adId}  ${status.padEnd(12)}  ${m.adTitle}\n`)
-            if (m.reason) process.stdout.write(`         Ok: ${m.reason}\n`)
+            process.stdout.write(`  #${m.id}  hirdetés #${m.adId}  ${m.action.padEnd(16)}  ${m.reasonCode}\n`)
+            if (m.reasonNote) process.stdout.write(`         Megjegyzés: ${m.reasonNote}\n`)
+            if (m.appeal) process.stdout.write(`         Fellebbezés: ${m.appeal.status}\n`)
           }
         }
       } catch (err) { handleError(err) }
@@ -1649,17 +1650,22 @@ export function registerShopCommands(
 
   moderation
     .command('appeal <id>')
-    .description('Moderációs döntés elleni fellebbezés (POST /api/v1/shop/my/moderation/:id/appeal) — hatókör: write')
-    .option('--reason <szöveg>', 'Fellebbezés indoklása')
-    .action(async (idStr: string, opts: { reason?: string }, cmd: Command) => {
+    .description('Moderációs döntés elleni fellebbezés (POST /api/v1/shop/my/moderation/:id/appeal) — hatókör: write; az üzenet min. 10 karakter')
+    .requiredOption('--message <szöveg>', 'Fellebbezés szövege (min. 10, max. 2000 karakter)')
+    .action(async (idStr: string, opts: { message: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id) || id <= 0) {
         process.stderr.write('Érvénytelen moderáció-azonosító.\n')
         process.exit(2)
         return
       }
+      if (opts.message.length < 10) {
+        process.stderr.write('Az üzenet legalább 10 karakter kell legyen.\n')
+        process.exit(2)
+        return
+      }
       try {
-        const result = await shopClient.moderation.appeal(id, opts.reason)
+        const result = await shopClient.moderation.appeal(id, opts.message)
         if (getJsonFlag(cmd)) printJson(result)
         else process.stdout.write(`Fellebbezés benyújtva (#${result.id}).\n`)
       } catch (err) { handleError(err) }

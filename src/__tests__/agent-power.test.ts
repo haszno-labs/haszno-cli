@@ -94,7 +94,8 @@ describe('HasznoApiError — code and requestId from error envelope', () => {
 
 describe('createShopClient().partner', () => {
   it('getProfile() → GET /api/v1/shop/partner/profile', async () => {
-    const body = { refCode: 'ref123', displayName: 'Test', bio: null, logoUrl: null, website: null, activeSyndications: 0, createdAt: '2026-01-01' }
+    // Response mirrors the actual API PartnerProfile contract
+    const body = { refCode: 'ref123', displayName: 'Test', feedJsonUrl: '/api/shop/partner/ref123/feed.json', feedXmlUrl: '/api/shop/partner/ref123/feed.xml', embedUrl: '/shop-beagyazas/ref123' }
     const { fn, calls } = makeFetch(200, body)
     const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     await client.partner.getProfile()
@@ -103,12 +104,21 @@ describe('createShopClient().partner', () => {
   })
 
   it('updateProfile() → PUT /api/v1/shop/partner/profile', async () => {
-    const body = { refCode: 'ref123', displayName: 'New', bio: null, logoUrl: null, website: null, activeSyndications: 0, createdAt: '2026-01-01' }
+    const body = { refCode: 'ref123', displayName: 'New', feedJsonUrl: '/api/shop/partner/ref123/feed.json', feedXmlUrl: '/api/shop/partner/ref123/feed.xml', embedUrl: '/shop-beagyazas/ref123' }
     const { fn, calls } = makeFetch(200, body)
     const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     await client.partner.updateProfile({ displayName: 'New' })
     expect(calls[0].url).toContain('/api/v1/shop/partner/profile')
     expect(calls[0].init.method).toBe('PUT')
+  })
+
+  it('updateProfile() only sends displayName — no bio/logoUrl/website keys', async () => {
+    const body = { refCode: 'ref123', displayName: 'New', feedJsonUrl: '/api/shop/partner/ref123/feed.json', feedXmlUrl: '/api/shop/partner/ref123/feed.xml', embedUrl: '/shop-beagyazas/ref123' }
+    const { fn, calls } = makeFetch(200, body)
+    const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    await client.partner.updateProfile({ displayName: 'New' })
+    const sentBody = JSON.parse(calls[0].init.body as string) as Record<string, unknown>
+    expect(Object.keys(sentBody)).toEqual(['displayName'])
   })
 
   it('listSyndications() → GET /api/v1/shop/partner/syndications', async () => {
@@ -120,12 +130,23 @@ describe('createShopClient().partner', () => {
   })
 
   it('upsertSyndication(42) → PUT /api/v1/shop/partner/syndications/42', async () => {
-    const body = { adId: 42, adTitle: 'Termék', markupPct: 10, status: 'active', createdAt: '2026-01-01', updatedAt: '2026-01-01' }
+    // Response mirrors the actual API Syndication contract
+    const body = { id: 1, ad: { id: 42, title: 'Termék' }, markupPct: 10, markupFt: 500, partnerPriceGross: 11000, earningFt: 500, live: true, createdAt: '2026-01-01' }
     const { fn, calls } = makeFetch(200, body)
     const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
-    await client.partner.upsertSyndication(42, { markupPct: 10 })
+    await client.partner.upsertSyndication(42, { markupPct: 10, markupFt: 500 })
     expect(calls[0].url).toContain('/api/v1/shop/partner/syndications/42')
     expect(calls[0].init.method).toBe('PUT')
+  })
+
+  it('upsertSyndication sends both markupPct and markupFt in body', async () => {
+    const body = { id: 1, ad: { id: 42, title: 'Termék' }, markupPct: 10, markupFt: 500, partnerPriceGross: 11000, earningFt: 500, live: true, createdAt: '2026-01-01' }
+    const { fn, calls } = makeFetch(200, body)
+    const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    await client.partner.upsertSyndication(42, { markupPct: 10, markupFt: 500 })
+    const sentBody = JSON.parse(calls[0].init.body as string) as { markupPct: number; markupFt: number }
+    expect(sentBody.markupPct).toBe(10)
+    expect(sentBody.markupFt).toBe(500)
   })
 
   it('removeSyndication(42) → DELETE /api/v1/shop/partner/syndications/42', async () => {
@@ -137,7 +158,7 @@ describe('createShopClient().partner', () => {
   })
 
   it('Bearer header is sent on partner requests', async () => {
-    const body = { refCode: 'r', displayName: null, bio: null, logoUrl: null, website: null, activeSyndications: 0, createdAt: '' }
+    const body = { refCode: 'r', displayName: 'R', feedJsonUrl: '/api/shop/partner/r/feed.json', feedXmlUrl: '/api/shop/partner/r/feed.xml', embedUrl: '/shop-beagyazas/r' }
     const { fn, calls } = makeFetch(200, body)
     const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
     await client.partner.getProfile()
@@ -156,20 +177,35 @@ describe('createShopClient().moderation', () => {
     expect(calls[0].init.method).toBe('GET')
   })
 
-  it('appeal(7) → POST /api/v1/shop/my/moderation/7/appeal', async () => {
-    const { fn, calls } = makeFetch(200, { ok: true, id: 7 })
+  it('list() response type has action/reasonCode/appeal fields (not decision/adTitle/reason)', async () => {
+    // Mirrors the actual ModerationAction contract
+    const item = { id: 1, adId: 10, action: 'figyelmeztetes', reasonCode: 'egyeb', reasonNote: null, actor: 'admin', createdAt: '2026-01-01', appeal: null }
+    const { fn } = makeFetch(200, [item])
     const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
-    await client.moderation.appeal(7)
+    const items = await client.moderation.list()
+    expect(items[0].action).toBe('figyelmeztetes')
+    expect(items[0].reasonCode).toBe('egyeb')
+    expect(items[0].appeal).toBeNull()
+  })
+
+  it('appeal(7, message) → POST /api/v1/shop/my/moderation/7/appeal', async () => {
+    // Response mirrors the actual API Appeal contract (201)
+    const appealResponse = { id: 7, actionId: 3, sellerMessage: 'Ez téves döntés volt.', status: 'fuggoben', decisionNote: null, decidedAt: null, createdAt: '2026-01-01' }
+    const { fn, calls } = makeFetch(201, appealResponse)
+    const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
+    await client.moderation.appeal(7, 'Ez téves döntés volt.')
     expect(calls[0].url).toContain('/api/v1/shop/my/moderation/7/appeal')
     expect(calls[0].init.method).toBe('POST')
   })
 
-  it('appeal(7, reason) sends reason in body', async () => {
-    const { fn, calls } = makeFetch(200, { ok: true, id: 7 })
+  it('appeal(7, message) sends message field (not reason) in body', async () => {
+    const appealResponse = { id: 7, actionId: 3, sellerMessage: 'Ez téves döntés volt.', status: 'fuggoben', decisionNote: null, decidedAt: null, createdAt: '2026-01-01' }
+    const { fn, calls } = makeFetch(201, appealResponse)
     const client = createShopClient({ apiKey: SHOP_TOKEN, fetch: fn as typeof fetch, readConfig: noConfig })
-    await client.moderation.appeal(7, 'Ez téves döntés volt')
-    const sentBody = JSON.parse(calls[0].init.body as string) as { reason: string }
-    expect(sentBody.reason).toBe('Ez téves döntés volt')
+    await client.moderation.appeal(7, 'Ez téves döntés volt.')
+    const sentBody = JSON.parse(calls[0].init.body as string) as { message: string }
+    expect(sentBody.message).toBe('Ez téves döntés volt.')
+    expect((sentBody as Record<string, unknown>).reason).toBeUndefined()
   })
 })
 

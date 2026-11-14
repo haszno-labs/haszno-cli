@@ -12,7 +12,7 @@ import { resolveConnection } from './config.js'
 import { HasznoApiError } from './error.js'
 
 /** CLI version for User-Agent */
-const CLI_VERSION = '0.3.0'
+const CLI_VERSION = '0.4.0'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -210,52 +210,100 @@ export interface ShopSellerProfile {
 
 // ── Partner profile / syndications ───────────────────────────────────────────
 
+/**
+ * Partner profile as returned by GET/PUT /api/v1/shop/partner/profile.
+ * Mirrors the API's PartnerProfile contract (api/src/shop/contract.ts).
+ */
 export interface ShopPartnerProfile {
   refCode: string
-  displayName: string | null
-  bio: string | null
-  logoUrl: string | null
-  website: string | null
-  activeSyndications: number
-  createdAt: string
+  displayName: string
+  /** Relative URL — e.g. /api/shop/partner/<refCode>/feed.json */
+  feedJsonUrl: string
+  /** Relative URL — e.g. /api/shop/partner/<refCode>/feed.xml */
+  feedXmlUrl: string
+  /** Relative URL — e.g. /shop-beagyazas/<refCode> */
+  embedUrl: string
 }
 
+/**
+ * Input for PUT /api/v1/shop/partner/profile.
+ * The API only accepts displayName; all other fields are stripped by Zod.
+ */
 export interface ShopPartnerProfileInput {
   displayName?: string
-  bio?: string
-  logoUrl?: string
-  website?: string
 }
 
+/** Minimal ad info nested inside a Syndication response. */
+export interface ShopPartnerSyndicationAd {
+  id: number
+  title: string
+}
+
+/**
+ * One syndicated ad as returned by GET/PUT /api/v1/shop/partner/syndications/*.
+ * Mirrors the API's Syndication contract (api/src/shop/contract.ts).
+ */
 export interface ShopPartnerSyndication {
-  adId: number
-  adTitle: string
+  id: number
+  ad: ShopPartnerSyndicationAd
   markupPct: number
-  status: string
+  markupFt: number
+  /** This shop's own price (null when the ad has no fixed price). */
+  partnerPriceGross: number | null
+  /** What this shop earns if it brings the buyer (Ft). */
+  earningFt: number | null
+  /** false = ad no longer active/resellable; dropped from feed automatically. */
+  live: boolean
   createdAt: string
-  updatedAt: string
 }
 
+/**
+ * Input for PUT /api/v1/shop/partner/syndications/:adId.
+ * Both markupPct and markupFt are required by the API (Zod schema).
+ */
 export interface ShopPartnerSyndicationInput {
   markupPct: number
+  /** Fixed markup in Ft (0–50 000 000). Required alongside markupPct. */
+  markupFt: number
 }
 
 // ── Moderation ────────────────────────────────────────────────────────────────
 
-export interface ShopModerationItem {
+export type ShopModerationActionType = 'figyelmeztetes' | 'szuneteltetes' | 'eltavolitas' | 'visszaallitas'
+export type ShopModerationActor = 'admin' | 'rendszer'
+export type ShopAppealStatus = 'fuggoben' | 'elfogadva' | 'elutasitva'
+
+/** An appeal filed by the seller against a moderation action. */
+export interface ShopModerationAppeal {
   id: number
-  adId: number
-  adTitle: string
-  decision: 'approved' | 'rejected' | 'appealed' | string
-  reason: string | null
-  resolvedAt: string | null
+  actionId: number
+  sellerMessage: string
+  status: ShopAppealStatus
+  decisionNote: string | null
+  decidedAt: string | null
   createdAt: string
 }
 
-export interface ShopModerationAppealResult {
-  ok: boolean
+/**
+ * One moderation action on an ad as returned by GET /api/v1/shop/my/moderation.
+ * Mirrors the API's ModerationAction contract (api/src/shop/contract.ts).
+ */
+export interface ShopModerationItem {
   id: number
+  adId: number
+  action: ShopModerationActionType
+  reasonCode: string
+  reasonNote: string | null
+  actor: ShopModerationActor
+  createdAt: string
+  appeal: ShopModerationAppeal | null
 }
+
+/**
+ * Response of POST /api/v1/shop/my/moderation/:id/appeal (201).
+ * Mirrors the API's Appeal contract.
+ */
+export type ShopModerationAppealResult = ShopModerationAppeal
 
 export type ShopSellerProfileInput =
   | { sellerType: 'maganszemely' }
@@ -535,8 +583,8 @@ export interface ShopHasznoClient {
   moderation: {
     /** GET /api/v1/shop/my/moderation — scope: read */
     list(): Promise<ShopModerationItem[]>
-    /** POST /api/v1/shop/my/moderation/:id/appeal — scope: write */
-    appeal(id: number, reason?: string): Promise<ShopModerationAppealResult>
+    /** POST /api/v1/shop/my/moderation/:id/appeal — scope: write; message min 10 chars */
+    appeal(id: number, message: string): Promise<ShopModerationAppealResult>
   }
 }
 
@@ -701,7 +749,7 @@ export function createShopClient(opts: HttpOptions): ShopHasznoClient {
 
     moderation: {
       list: () => get('/api/v1/shop/my/moderation', o),
-      appeal: (id, reason) => post(`/api/v1/shop/my/moderation/${id}/appeal`, reason !== undefined ? { reason } : {}, o),
+      appeal: (id, message) => post(`/api/v1/shop/my/moderation/${id}/appeal`, { message }, o),
     },
   }
 }
