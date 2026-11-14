@@ -28,9 +28,25 @@ var ShopTokenNotSupportedError = class extends Error {
     this.operation = operation;
   }
 };
+var LegacyKeyNotSupportedError = class extends Error {
+  isLegacyKeyNotSupported = true;
+  operation;
+  constructor(operation) {
+    super(
+      `"${operation}" csak bolt API-tokennel (haszno_\u2026) \xE9rhet\u0151 el \u2014 a Napi jelent\xE9s \xE9s agent-parancsok nem m\u0171k\xF6dnek sima API-kulccsal. Hozzon l\xE9tre bolt API-tokent itt: /app/api-kulcsok (Haszno webalkalmaz\xE1s). Shop token required: create one at /app/api-kulcsok in the Haszno web app.`
+    );
+    this.name = "LegacyKeyNotSupportedError";
+    this.operation = operation;
+  }
+};
 function notSupported(op) {
   return (..._args) => {
     return Promise.reject(new ShopTokenNotSupportedError(op));
+  };
+}
+function notSupportedLegacy(op) {
+  return (..._args) => {
+    return Promise.reject(new LegacyKeyNotSupportedError(op));
   };
 }
 function createClient(opts = {}) {
@@ -134,6 +150,21 @@ function createShopTokenClient(opts) {
     blog: {
       list: notSupported("blog.list"),
       get: notSupported("blog.get")
+    },
+    manager: {
+      listReports: () => get("/api/daily-reports", o),
+      getLatestReport: () => get("/api/agent/daily-report", o),
+      getReport: (day) => get(`/api/agent/daily-report/${day}`, o),
+      getResearchBrief: () => get("/api/agent/research-brief", o),
+      postFindings: (day, body) => post(`/api/agent/daily-report/${day}/findings`, body, o),
+      listActions: (params) => {
+        const qs = new URLSearchParams();
+        if (params?.status) qs.set("status", params.status);
+        if (params?.limit != null) qs.set("limit", String(params.limit));
+        const suffix = qs.toString() ? `?${qs.toString()}` : "";
+        return get(`/api/agent/actions${suffix}`, o);
+      },
+      proposeAction: (body) => post("/api/agent/actions", body, o)
     }
   };
 }
@@ -282,6 +313,18 @@ function createLegacyClient(opts) {
         return get(`/api/blog${suffix}`, o);
       },
       get: (slug) => get(`/api/blog/${slug}`, o)
+    },
+    // manager.* requires a shop token (haszno_…). In legacy mode these endpoints
+    // either return synthetic demo data (GET /api/agent/actions → HTTP 200 with
+    // fake rows) or 401. Both outcomes are wrong for a production agent.
+    manager: {
+      listReports: notSupportedLegacy("manager.listReports"),
+      getLatestReport: notSupportedLegacy("manager.getLatestReport"),
+      getReport: notSupportedLegacy("manager.getReport"),
+      getResearchBrief: notSupportedLegacy("manager.getResearchBrief"),
+      postFindings: notSupportedLegacy("manager.postFindings"),
+      listActions: notSupportedLegacy("manager.listActions"),
+      proposeAction: notSupportedLegacy("manager.proposeAction")
     }
   };
 }
@@ -2863,9 +2906,508 @@ function registerBlogCommands(program2, client2) {
   });
 }
 
+// src/commands/report.ts
+function isJsonMode7(cmd) {
+  let c = cmd;
+  while (c.parent) c = c.parent;
+  return !!c.opts().json;
+}
+function printJson4(data) {
+  process.stdout.write(JSON.stringify(data, null, 2) + "\n");
+}
+function fmtFt3(n) {
+  return n.toLocaleString("hu-HU") + " Ft";
+}
+function fmtPct4(n) {
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(1)}%`;
+}
+function kindLabel(kind) {
+  switch (kind) {
+    case "ar_emelkedes":
+      return "\xC1remelked\xE9s";
+    case "ar_csokkenes":
+      return "\xC1rcs\xF6kken\xE9s";
+    case "trend":
+      return "Trend";
+    case "hir":
+      return "H\xEDr";
+    case "keszlet":
+      return "K\xE9szlet";
+    case "top_eladas":
+      return "Top elad\xE1s";
+    case "lehetoseg":
+      return "Lehet\u0151s\xE9g";
+    default:
+      return kind;
+  }
+}
+function originBadge(origin) {
+  return origin === "agent" ? "[Agent-kutat\xE1s]" : "[Haszno-adat]";
+}
+function printReportItem(item, index) {
+  const badge = originBadge(item.origin);
+  const changeSuffix = item.changePct != null ? `  (${fmtPct4(item.changePct)})` : "";
+  const keywordSuffix = item.keyword ? `  Kulcssz\xF3: ${item.keyword}` : "";
+  process.stdout.write(`
+  ${index}. ${kindLabel(item.kind)}${changeSuffix}  ${badge}
+`);
+  process.stdout.write(`     ${item.title}
+`);
+  process.stdout.write(`     ${item.body}
+`);
+  if (item.productName) {
+    process.stdout.write(`     Term\xE9k: ${item.productName} (ID: ${item.productId})${keywordSuffix}
+`);
+  }
+  if (item.sourceName) {
+    const urlPart = item.sourceUrl ? `  ${item.sourceUrl}` : "";
+    process.stdout.write(`     Forr\xE1s: ${item.sourceName}${urlPart}
+`);
+  }
+  if (item.suggestedAction) {
+    const a = item.suggestedAction;
+    let actionDesc2;
+    switch (a.type) {
+      case "felvetel":
+        actionDesc2 = `Felv\xE9tel (term\xE9k #${a.productId})`;
+        break;
+      case "levetel":
+        actionDesc2 = `Lev\xE9tel (term\xE9k #${a.productId})`;
+        break;
+      case "ar":
+        actionDesc2 = `\xC1t\xE1raz\xE1s \u2192 ${fmtFt3(a.priceGross)} (term\xE9k #${a.productId})`;
+        break;
+      case "import":
+        actionDesc2 = `Import (h\xE1l\xF3zati term\xE9k #${a.networkProductId})`;
+        break;
+      default:
+        actionDesc2 = JSON.stringify(a);
+    }
+    if (item.action) {
+      process.stdout.write(`     Javaslat: ${actionDesc2}  \u2192 \xC1llapot: ${item.action.status}
+`);
+    } else {
+      process.stdout.write(`     Javaslat: ${actionDesc2}  (J\xF3v\xE1hagyhat\xF3 a webes fel\xFCleten)
+`);
+    }
+  }
+}
+function printReport(report) {
+  process.stdout.write(`
+Napi piaci jelent\xE9s \u2014 ${report.day}
+`);
+  process.stdout.write("=".repeat(50) + "\n");
+  if (report.headline) {
+    process.stdout.write(`
+${report.headline}
+`);
+  }
+  if (report.summary) {
+    process.stdout.write(`
+${report.summary}
+`);
+  }
+  if (report.items.length === 0) {
+    process.stdout.write("\nNincs elem ebben a jelent\xE9sben.\n");
+    return;
+  }
+  const groups = /* @__PURE__ */ new Map();
+  for (const item of report.items) {
+    const list = groups.get(item.kind) ?? [];
+    list.push(item);
+    groups.set(item.kind, list);
+  }
+  const kindOrder = [
+    "ar_emelkedes",
+    "ar_csokkenes",
+    "trend",
+    "keszlet",
+    "top_eladas",
+    "lehetoseg",
+    "hir"
+  ];
+  let idx = 1;
+  for (const kind of kindOrder) {
+    const items = groups.get(kind);
+    if (!items || items.length === 0) continue;
+    process.stdout.write(`
+\u2500\u2500 ${kindLabel(kind)} (${items.length}) \u2500\u2500
+`);
+    for (const item of items) {
+      printReportItem(item, idx++);
+    }
+    groups.delete(kind);
+  }
+  for (const [kind, items] of groups) {
+    process.stdout.write(`
+\u2500\u2500 ${kindLabel(kind)} (${items.length}) \u2500\u2500
+`);
+    for (const item of items) {
+      printReportItem(item, idx++);
+    }
+  }
+  process.stdout.write(`
+\xD6sszesen: ${report.items.length} elem
+`);
+}
+function die3(msg, code = 1) {
+  process.stderr.write(`Hiba: ${msg}
+`);
+  process.exit(code);
+}
+function registerReportCommands(program2, client2) {
+  program2.command("report").description("Napi piaci jelent\xE9s megjelen\xEDt\xE9se (alap\xE9rtelmezett: legut\xF3bbi)").option("--day <YYYY-MM-DD>", "Adott nap jelent\xE9se (pl. 2026-11-12)").action(async (opts, cmd) => {
+    if (opts.day && !/^\d{4}-\d{2}-\d{2}$/.test(opts.day)) {
+      die3("\xC9rv\xE9nytelen d\xE1tumform\xE1tum \u2014 YYYY-MM-DD sz\xFCks\xE9ges (pl. 2026-11-12)", 2);
+    }
+    let report;
+    try {
+      if (opts.day) {
+        report = await client2.manager.getReport(opts.day);
+      } else {
+        report = await client2.manager.getLatestReport();
+      }
+    } catch (err) {
+      die3(err instanceof Error ? err.message : String(err));
+    }
+    if (!report) {
+      process.stdout.write("M\xE9g nem \xE9rhet\u0151 el napi jelent\xE9s.\n");
+      process.exit(0);
+      return;
+    }
+    if (isJsonMode7(cmd)) {
+      printJson4(report);
+    } else {
+      printReport(report);
+    }
+  });
+}
+
+// src/commands/research.ts
+import { readFileSync as readFileSync2 } from "fs";
+function isJsonMode8(cmd) {
+  let c = cmd;
+  while (c.parent) c = c.parent;
+  return !!c.opts().json;
+}
+function printJson5(data) {
+  process.stdout.write(JSON.stringify(data, null, 2) + "\n");
+}
+function fmtFt4(n) {
+  return n.toLocaleString("hu-HU") + " Ft";
+}
+function printBrief(brief) {
+  process.stdout.write(`
+Kutat\xE1si \xF6sszefoglal\xF3 \u2014 ${brief.day}
+`);
+  process.stdout.write("=".repeat(50) + "\n");
+  process.stdout.write(`
+Eredm\xE9nyek ide k\xFCldhet\u0151k: POST ${brief.postTo}
+`);
+  if (brief.shopFocus.length > 0) {
+    process.stdout.write("\nF\xF3kusz-term\xE9kek:\n");
+    for (const f of brief.shopFocus) {
+      const price = f.priceGross != null ? fmtFt4(f.priceGross) : "\u2014";
+      const market = f.marketMinGross != null ? fmtFt4(f.marketMinGross) : "\u2014";
+      const trend = f.trend ?? "ismeretlen";
+      process.stdout.write(
+        `  ${f.keyword.padEnd(20)}  saj\xE1t \xE1r: ${price.padStart(12)}  piac min: ${market.padStart(12)}  trend: ${trend}
+`
+      );
+    }
+  }
+  if (brief.questions.length > 0) {
+    process.stdout.write("\nKutat\xE1si k\xE9rd\xE9sek:\n");
+    for (let i = 0; i < brief.questions.length; i++) {
+      process.stdout.write(`  ${i + 1}. ${brief.questions[i]}
+`);
+    }
+  }
+}
+function printPostResult(report) {
+  const agentCount = report.items.filter((i) => i.origin === "agent").length;
+  process.stdout.write(
+    `Eredm\xE9nyek felt\xF6ltve: ${report.day} \u2014 \xF6sszesen ${report.items.length} elem, ebb\u0151l ${agentCount} agent-kutat\xE1s
+`
+  );
+}
+function die4(msg, code = 1) {
+  process.stderr.write(`Hiba: ${msg}
+`);
+  process.exit(code);
+}
+async function readStdin() {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    process.stdin.on("data", (chunk) => chunks.push(chunk));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+    process.stdin.on("error", reject);
+  });
+}
+function registerResearchCommands(program2, client2) {
+  const research = program2.command("research").description("Agent-kutat\xE1s: \xF6sszefoglal\xF3 lek\xE9r\xE9se \xE9s eredm\xE9nyek felt\xF6lt\xE9se");
+  research.command("brief").description("Mai kutat\xE1si \xF6sszefoglal\xF3 lek\xE9r\xE9se (f\xF3kusz-term\xE9kek \xE9s k\xE9rd\xE9sek)").action(async (_opts, cmd) => {
+    let brief;
+    try {
+      brief = await client2.manager.getResearchBrief();
+    } catch (err) {
+      die4(err instanceof Error ? err.message : String(err));
+    }
+    if (isJsonMode8(cmd)) {
+      printJson5(brief);
+    } else {
+      printBrief(brief);
+    }
+  });
+  research.command("post [file]").description(
+    'Agent-kutat\xE1si eredm\xE9nyek felt\xF6lt\xE9se (FindingsInput JSON f\xE1jlb\xF3l vagy stdin-r\u0151l ha -).\nA nap meghat\xE1roz\xE1sa: --day kapcsol\xF3, vagy a JSON "day" mez\u0151je, vagy a mai nap.'
+  ).option("--day <YYYY-MM-DD>", "C\xE9lnap (alap\xE9rtelmezett: mai nap UTC szerint)").action(async (file, opts, cmd) => {
+    if (opts.day && !/^\d{4}-\d{2}-\d{2}$/.test(opts.day)) {
+      die4("\xC9rv\xE9nytelen d\xE1tumform\xE1tum \u2014 YYYY-MM-DD sz\xFCks\xE9ges (pl. 2026-11-12)", 2);
+    }
+    let raw;
+    if (!file || file === "-") {
+      try {
+        raw = await readStdin();
+      } catch (err) {
+        die4(`Nem siker\xFClt beolvasni a standard bemenetet: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else {
+      try {
+        raw = readFileSync2(file, "utf-8");
+      } catch (err) {
+        die4(`Nem siker\xFClt megnyitni a f\xE1jlt "${file}": ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    let body;
+    try {
+      body = JSON.parse(raw);
+    } catch (err) {
+      die4(`\xC9rv\xE9nytelen JSON: ${err instanceof Error ? err.message : String(err)}`, 2);
+    }
+    if (!body || typeof body !== "object") {
+      die4("A JSON-nak FindingsInput objektumnak kell lennie", 2);
+    }
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      die4("A FindingsInput.items legal\xE1bb 1 elemet kell tartalmazzon", 2);
+    }
+    const day = opts.day ?? (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    let report;
+    try {
+      report = await client2.manager.postFindings(day, body);
+    } catch (err) {
+      die4(err instanceof Error ? err.message : String(err));
+    }
+    if (isJsonMode8(cmd)) {
+      printJson5(report);
+    } else {
+      printPostResult(report);
+    }
+  });
+}
+
+// src/commands/actions.ts
+function isJsonMode9(cmd) {
+  let c = cmd;
+  while (c.parent) c = c.parent;
+  return !!c.opts().json;
+}
+function printJson6(data) {
+  process.stdout.write(JSON.stringify(data, null, 2) + "\n");
+}
+function fmtFt5(n) {
+  if (n == null) return "\u2014";
+  return n.toLocaleString("hu-HU") + " Ft";
+}
+function fmtDate4(s) {
+  if (!s) return "\u2014";
+  return new Date(s).toLocaleString("hu-HU", { dateStyle: "short", timeStyle: "short" });
+}
+function statusLabel3(s) {
+  switch (s) {
+    case "javasolt":
+      return "javasolt";
+    case "vegrehajtva":
+      return "v\xE9grehajtva";
+    case "elutasitva":
+      return "elutas\xEDtva";
+    case "hiba":
+      return "hiba";
+    case "visszavonva":
+      return "visszavonva";
+    default:
+      return s;
+  }
+}
+function actionDesc(a) {
+  switch (a.type) {
+    case "felvetel":
+      return `felv\xE9tel (term\xE9k #${a.productId})`;
+    case "levetel":
+      return `lev\xE9tel (term\xE9k #${a.productId})`;
+    case "ar":
+      return `\xE1t\xE1raz\xE1s \u2192 ${fmtFt5(a.priceGross)} (term\xE9k #${a.productId})`;
+    case "import":
+      return `import (h\xE1l\xF3zati term\xE9k #${a.networkProductId})`;
+    default:
+      return JSON.stringify(a);
+  }
+}
+function padEnd2(s, n) {
+  return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
+}
+function printActionsTable(rows) {
+  if (rows.length === 0) {
+    process.stdout.write("Nincs tal\xE1lat.\n");
+    return;
+  }
+  const idW = 6;
+  const typeW = 10;
+  const targetW = 24;
+  const statusW = 13;
+  const autoW = 5;
+  const dateW = 16;
+  const header = "ID".padStart(idW) + "  " + padEnd2("T\xEDpus", typeW) + "  " + padEnd2("C\xE9l", targetW) + "  " + padEnd2("\xC1llapot", statusW) + "  " + padEnd2("Auto", autoW) + "  " + padEnd2("L\xE9trehozva", dateW);
+  process.stdout.write(header + "\n" + "\u2500".repeat(header.length) + "\n");
+  for (const r of rows) {
+    const targetName = r.target?.name ?? actionDesc(r.action);
+    const autoStr = r.autoApproved ? "  \u2713" : "";
+    const line = String(r.id).padStart(idW) + "  " + padEnd2(r.action.type, typeW) + "  " + padEnd2(targetName, targetW) + "  " + padEnd2(statusLabel3(r.status), statusW) + "  " + padEnd2(autoStr, autoW) + "  " + padEnd2(fmtDate4(r.createdAt), dateW);
+    process.stdout.write(line + "\n");
+  }
+  process.stdout.write(`
+\xD6sszesen: ${rows.length} m\u0171velet
+`);
+}
+function printActionDetail(action) {
+  process.stdout.write("\n\xDAj agent-javaslat l\xE9trehozva:\n");
+  process.stdout.write(`  ID:          ${action.id}
+`);
+  process.stdout.write(`  T\xEDpus:       ${action.action.type}
+`);
+  process.stdout.write(`  Le\xEDr\xE1s:      ${actionDesc(action.action)}
+`);
+  process.stdout.write(`  Ok:          ${action.reason}
+`);
+  process.stdout.write(`  \xC1llapot:     ${statusLabel3(action.status)}
+`);
+  if (action.autoApproved) {
+    process.stdout.write(`  Autopilot:   automatikusan v\xE9grehajtva
+`);
+  }
+  if (action.target) {
+    process.stdout.write(`  C\xE9l term\xE9k:  ${action.target.name}${action.target.sku ? ` (${action.target.sku})` : ""}
+`);
+  }
+  if (action.preview) {
+    const p = action.preview;
+    if (p.oldPriceGross != null) process.stdout.write(`  R\xE9gi \xE1r:     ${fmtFt5(p.oldPriceGross)}
+`);
+    if (p.newPriceGross != null) process.stdout.write(`  \xDAj \xE1r:       ${fmtFt5(p.newPriceGross)}
+`);
+    if (p.floorGross != null) process.stdout.write(`  \xC1rpadl\xF3:     ${fmtFt5(p.floorGross)}
+`);
+    if (p.marginPct != null) process.stdout.write(`  Haszon:      ${p.marginPct.toFixed(1)}%
+`);
+  }
+  if (!action.autoApproved && action.status === "javasolt") {
+    process.stdout.write("\n  A j\xF3v\xE1hagy\xE1s a webes fel\xFCleten v\xE9gezhet\u0151 el: /app\n");
+  }
+}
+function die5(msg, code = 1) {
+  process.stderr.write(`Hiba: ${msg}
+`);
+  process.exit(code);
+}
+var ALLOWED_STATUSES = ["javasolt", "vegrehajtva", "elutasitva", "hiba", "visszavonva"];
+function registerActionsCommands(program2, client2) {
+  const actions = program2.command("actions").description("Agent-m\u0171veletek kezel\xE9se (javaslatok \xE9s v\xE9grehajtott m\u0171veletek)");
+  actions.command("list").description("Agent-m\u0171veletek list\xE1z\xE1sa (leg\xFAjabb el\u0151sz\xF6r, alap\xE9rtelmezett: mind)").option("-s, --status <\xE1llapot>", `Sz\u0171r\xE9s \xE1llapotra: ${ALLOWED_STATUSES.join(" | ")}`).option("-l, --limit <n>", "Maximum visszaadott elemek sz\xE1ma (1\u2013200, alap\xE9rt. 50)", "50").action(async (opts, cmd) => {
+    if (opts.status && !ALLOWED_STATUSES.includes(opts.status)) {
+      die5(
+        `\xC9rv\xE9nytelen \xE1llapot: "${opts.status}". Lehets\xE9ges \xE9rt\xE9kek: ${ALLOWED_STATUSES.join(", ")}`,
+        2
+      );
+    }
+    const limit = parseInt(opts.limit, 10);
+    if (isNaN(limit) || limit < 1 || limit > 200) {
+      die5("A --limit \xE9rt\xE9knek 1 \xE9s 200 k\xF6z\xE9 kell esnie", 2);
+    }
+    let rows;
+    try {
+      rows = await client2.manager.listActions({
+        status: opts.status,
+        limit
+      });
+    } catch (err) {
+      die5(err instanceof Error ? err.message : String(err));
+    }
+    if (isJsonMode9(cmd)) {
+      printJson6(rows);
+    } else {
+      printActionsTable(rows);
+    }
+  });
+  actions.command("propose").description(
+    "\xDAj agent-javaslat l\xE9trehoz\xE1sa. J\xF3v\xE1hagy\xE1s a webes fel\xFCleten (/app) sz\xFCks\xE9ges.\nT\xEDpusok: felvetel, levetel, ar, import"
+  ).requiredOption("--type <t\xEDpus>", "M\u0171velet t\xEDpusa: felvetel | levetel | ar | import").option("--product-id <id>", "Term\xE9k ID-ja (felvetel, levetel, ar eset\xE9n k\xF6telez\u0151)").option("--network-product-id <id>", "H\xE1l\xF3zati term\xE9k ID-ja (import eset\xE9n k\xF6telez\u0151)").option("--price <gross>", "Brutt\xF3 \xE1r forintban (ar eset\xE9n k\xF6telez\u0151)").requiredOption("--reason <sz\xF6veg>", "Ok/indokl\xE1s (5\u2013500 karakter)").option("--report-item <id>", "Kapcsol\xF3d\xF3 jelent\xE9s-elem ID-ja (opcion\xE1lis)").action(async (opts, cmd) => {
+    const { type, reason, productId, networkProductId, price, reportItem } = opts;
+    const validTypes = ["felvetel", "levetel", "ar", "import"];
+    if (!validTypes.includes(type)) {
+      die5(`\xC9rv\xE9nytelen t\xEDpus: "${type}". Lehets\xE9ges \xE9rt\xE9kek: ${validTypes.join(", ")}`, 2);
+    }
+    if (reason.length < 5 || reason.length > 500) {
+      die5("Az indokl\xE1s (--reason) 5\u2013500 karakter hossz\xFA kell legyen", 2);
+    }
+    let actionInput;
+    if (type === "felvetel" || type === "levetel") {
+      if (!productId) {
+        die5(`A --product-id k\xF6telez\u0151 a "${type}" t\xEDpushoz`, 2);
+      }
+      const pid = parseInt(productId, 10);
+      if (isNaN(pid) || pid <= 0) die5("\xC9rv\xE9nytelen --product-id", 2);
+      actionInput = { type, productId: pid };
+    } else if (type === "ar") {
+      if (!productId) die5('A --product-id k\xF6telez\u0151 az "ar" t\xEDpushoz', 2);
+      if (!price) die5('A --price k\xF6telez\u0151 az "ar" t\xEDpushoz', 2);
+      const pid = parseInt(productId, 10);
+      const priceNum = Number(price);
+      if (isNaN(pid) || pid <= 0) die5("\xC9rv\xE9nytelen --product-id", 2);
+      if (!Number.isFinite(priceNum) || priceNum <= 0) die5("\xC9rv\xE9nytelen --price \u2014 pozit\xEDv eg\xE9sz sz\xE1m sz\xFCks\xE9ges (Ft)", 2);
+      if (!Number.isInteger(priceNum)) die5("A --price \xE9rt\xE9knek eg\xE9sz sz\xE1mnak kell lennie (Ft, pl. 180000)", 2);
+      actionInput = { type: "ar", productId: pid, priceGross: priceNum };
+    } else {
+      if (!networkProductId) die5('A --network-product-id k\xF6telez\u0151 az "import" t\xEDpushoz', 2);
+      const nid = parseInt(networkProductId, 10);
+      if (isNaN(nid) || nid <= 0) die5("\xC9rv\xE9nytelen --network-product-id", 2);
+      actionInput = { type: "import", networkProductId: nid };
+    }
+    const reportItemId = reportItem ? parseInt(reportItem, 10) : void 0;
+    if (reportItemId !== void 0 && (isNaN(reportItemId) || reportItemId <= 0)) {
+      die5("\xC9rv\xE9nytelen --report-item \u2014 pozit\xEDv eg\xE9sz sz\xE1m sz\xFCks\xE9ges", 2);
+    }
+    let action;
+    try {
+      action = await client2.manager.proposeAction({
+        ...actionInput,
+        reason,
+        ...reportItemId !== void 0 ? { reportItemId } : {}
+      });
+    } catch (err) {
+      die5(err instanceof Error ? err.message : String(err));
+    }
+    if (isJsonMode9(cmd)) {
+      printJson6(action);
+    } else {
+      printActionDetail(action);
+    }
+  });
+}
+
 // src/commands/shop.ts
 import { createInterface as createInterface4 } from "readline";
-import { readFileSync as readFileSync2, readdirSync, statSync } from "fs";
+import { readFileSync as readFileSync3, readdirSync, statSync } from "fs";
 import { join, extname } from "path";
 function getJsonFlag2(cmd) {
   try {
@@ -3943,7 +4485,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
       } else {
         let csvText;
         try {
-          csvText = readFileSync2(source, "utf8");
+          csvText = readFileSync3(source, "utf8");
         } catch (err) {
           process.stderr.write(`Nem siker\xFClt beolvasni a CSV f\xE1jlt: ${err instanceof Error ? err.message : String(err)}
 `);
@@ -4163,6 +4705,9 @@ registerAccountCommands(program, client);
 registerCatalogueCommands(program, client);
 registerPeersCommands(program, client);
 registerBlogCommands(program, client);
+registerReportCommands(program, client);
+registerResearchCommands(program, client);
+registerActionsCommands(program, client);
 registerShopCommands(program, shopClient);
 program.parse();
 //# sourceMappingURL=index.js.map

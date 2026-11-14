@@ -398,6 +398,138 @@ export interface PeerLink {
   createdAt: string
 }
 
+// ---- Manager: daily reports, agent actions, autopilot -----------------------
+
+export type ActionType = 'felvetel' | 'levetel' | 'ar' | 'import'
+
+export type ActionInput =
+  | { type: 'felvetel'; productId: number }
+  | { type: 'levetel'; productId: number }
+  | { type: 'ar'; productId: number; priceGross: number }
+  | { type: 'import'; networkProductId: number }
+
+export type ActionStatus = 'javasolt' | 'vegrehajtva' | 'elutasitva' | 'hiba' | 'visszavonva'
+export type ActionOrigin = 'agent' | 'autopilot' | 'jelentes' | 'kezi'
+
+export type ReportItemKind =
+  | 'ar_emelkedes'
+  | 'ar_csokkenes'
+  | 'trend'
+  | 'hir'
+  | 'keszlet'
+  | 'top_eladas'
+  | 'lehetoseg'
+
+export type ReportItemOrigin = 'rendszer' | 'agent'
+
+export interface AgentActionTarget {
+  name: string
+  sku: string | null
+  imageUrl: string | null
+}
+
+export interface AgentActionPreview {
+  oldPriceGross: number | null
+  newPriceGross: number | null
+  floorGross: number | null
+  marginPct: number | null
+}
+
+export interface AgentAction {
+  id: number
+  action: ActionInput
+  reason: string
+  status: ActionStatus
+  origin: ActionOrigin
+  autoApproved: boolean
+  reportItemId: number | null
+  target: AgentActionTarget | null
+  preview: AgentActionPreview | null
+  error: string | null
+  canUndo: boolean
+  createdAt: string
+  decidedAt: string | null
+  executedAt: string | null
+}
+
+export interface ReportItem {
+  id: number
+  origin: ReportItemOrigin
+  kind: ReportItemKind
+  title: string
+  body: string
+  changePct: number | null
+  keyword: string | null
+  productId: number | null
+  productName: string | null
+  sourceName: string | null
+  sourceUrl: string | null
+  suggestedAction: ActionInput | null
+  action: AgentAction | null
+}
+
+export interface DailyReport {
+  id: number
+  day: string
+  headline: string
+  summary: string
+  items: ReportItem[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DailyReportSummary {
+  id: number
+  day: string
+  headline: string
+  itemCount: number
+  agentItemCount: number
+}
+
+export interface ResearchBriefFocus {
+  keyword: string
+  productId: number | null
+  name: string
+  priceGross: number | null
+  marketMinGross: number | null
+  trend: 'emelkedo' | 'stabil' | 'csokkeno' | null
+}
+
+export interface ResearchBrief {
+  day: string
+  shopFocus: ResearchBriefFocus[]
+  questions: string[]
+  postTo: string
+}
+
+export interface FindingInput {
+  kind: ReportItemKind
+  title: string
+  body: string
+  changePct?: number | null
+  keyword?: string | null
+  productId?: number | null
+  sourceName?: string | null
+  sourceUrl?: string | null
+  suggestedAction?: ActionInput | null
+}
+
+export interface FindingsInput {
+  headline?: string
+  summary?: string
+  items: FindingInput[]
+}
+
+export interface AutopilotSettings {
+  enabled: boolean
+  autoTypes: ActionType[]
+  maxActionsPerDay: number
+  maxPriceChangePct: number
+  minMarginPct: number
+  usedToday: number
+  updatedAt: string | null
+}
+
 // ---- Blog -------------------------------------------------------------------
 
 export type BlogPostStatus = 'piszkozat' | 'publikalt'

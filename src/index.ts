@@ -29,6 +29,9 @@ import { registerAccountCommands } from './commands/account.js'
 import { registerCatalogueCommands } from './commands/catalogue.js'
 import { registerPeersCommands } from './commands/peers.js'
 import { registerBlogCommands } from './commands/blog.js'
+import { registerReportCommands } from './commands/report.js'
+import { registerResearchCommands } from './commands/research.js'
+import { registerActionsCommands } from './commands/actions.js'
 import { registerShopCommands } from './commands/shop.js'
 import { createShopClient } from './client/shop.js'
 
@@ -73,6 +76,9 @@ registerAccountCommands(program, client)
 registerCatalogueCommands(program, client)
 registerPeersCommands(program, client)
 registerBlogCommands(program, client)
+registerReportCommands(program, client)
+registerResearchCommands(program, client)
+registerActionsCommands(program, client)
 registerShopCommands(program, shopClient)
 
 program.parse()
