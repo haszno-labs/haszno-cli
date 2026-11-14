@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 import {
-  CONFIG_PATH,
   HasznoApiError,
   del,
   get,
   isShopToken,
   patch,
   post,
-  put,
+  put
+} from "./chunk-VM33OE5G.js";
+import {
+  CONFIG_PATH,
   readConfigFile,
   readConfigObject,
   resolveConnection
-} from "./chunk-QXN2O5TR.js";
+} from "./chunk-HOIDK4EJ.js";
 
 // src/index.ts
 import { Command as Command2 } from "commander";
@@ -1991,6 +1993,17 @@ function createShopClient(opts) {
     sellerProfile: {
       get: () => get("/api/v1/shop/my/seller-profile", o),
       set: (body) => put("/api/v1/shop/my/seller-profile", body, o)
+    },
+    partner: {
+      getProfile: () => get("/api/v1/shop/partner/profile", o),
+      updateProfile: (body) => put("/api/v1/shop/partner/profile", body, o),
+      listSyndications: () => get("/api/v1/shop/partner/syndications", o),
+      upsertSyndication: (adId, body) => put(`/api/v1/shop/partner/syndications/${adId}`, body, o),
+      removeSyndication: (adId) => del(`/api/v1/shop/partner/syndications/${adId}`, o)
+    },
+    moderation: {
+      list: () => get("/api/v1/shop/my/moderation", o),
+      appeal: (id, reason) => post(`/api/v1/shop/my/moderation/${id}/appeal`, reason !== void 0 ? { reason } : {}, o)
     }
   };
 }
@@ -2018,9 +2031,23 @@ function printKv(rows) {
 `);
   }
 }
+function nextStepHint(status, code) {
+  if (status === 401 || code === "unauthenticated") return "Futtasd: haszno login";
+  if (status === 403 || code === "forbidden") return "Ellen\u0151rizd a token hat\xF3k\xF6r\xE9t (read/write) \xE9s a bolt-token korl\xE1toz\xE1sait.";
+  if (status === 404 || code === "not_found") return "Ellen\u0151rizd az azonos\xEDt\xF3t.";
+  if (status === 409 || code === "conflict") return "Ism\xE9telt nonce: k\xE9rj \xFAj azonos\xEDt\xF3t (randomUUID), vagy keresd a GET list\xE1ban az eredeti bejegyz\xE9st.";
+  if (status === 422 || code === "unprocessable") return "Ellen\u0151rizd az \xE1rszintet: a javasolt \xE1r nem lehet az \xE1r-minimum alatt.";
+  if (status === 429 || code === "rate_limited") return "T\xFAl sok k\xE9r\xE9s \u2014 v\xE1rj egy percet \xE9s pr\xF3b\xE1ld \xFAjra.";
+  return void 0;
+}
 function handleError2(err) {
   if (err instanceof HasznoApiError) {
-    process.stderr.write(`Hiba: ${err.message} (HTTP ${err.status})
+    let msg = `Hiba: ${err.message} (HTTP ${err.status})`;
+    if (err.code) msg += `  [code: ${err.code}]`;
+    if (err.requestId) msg += `  [requestId: ${err.requestId}]`;
+    process.stderr.write(msg + "\n");
+    const hint = nextStepHint(err.status, err.code);
+    if (hint) process.stderr.write(`  \u2192 ${hint}
 `);
   } else if (err instanceof Error) {
     process.stderr.write(`Hiba: ${err.message}
@@ -2145,7 +2172,7 @@ Token elmentve: ${configPath}
       const apiUrl = existing["apiUrl"] ?? "https://haszno.com";
       try {
         const revokeOpts = { ...httpOpts, baseUrl: apiUrl, apiKey };
-        const { post: httpPost } = await import("./http-5DXIMCSB.js");
+        const { post: httpPost } = await import("./http-GIS2D4PG.js");
         await httpPost("/api/v1/auth/tokens/revoke-current", {}, revokeOpts);
         process.stdout.write("Token visszavonva a szerveren.\n");
       } catch {
@@ -2231,24 +2258,51 @@ Token elmentve: ${configPath}
       handleError2(err);
     }
   });
-  account.command("whoami").description("Azonos\xEDt\xE1s \xE9s be\xE1ll\xEDt\xE1sok \xF6sszefoglal\xF3ja / identity + settings summary").action(async (_opts, cmd) => {
+  account.command("whoami").description("Azonos\xEDt\xE1s \xF6sszefoglal\xF3ja \u2014 bolt-tokennel /api/v1/auth/me-t h\xEDv, egy\xE9b hiteles\xEDt\xE9sn\xE9l az API be\xE1ll\xEDt\xE1sait k\xE9ri le").action(async (_opts, cmd) => {
+    const { resolveConnection: resolveConnection2 } = await import("./config-QM7YIT3B.js");
+    const { isShopToken: isShopToken2 } = await import("./http-GIS2D4PG.js");
+    const conn = resolveConnection2(httpOpts, process.env);
+    const isShop = isShopToken2(conn.apiKey);
     try {
-      const [health, settings] = await Promise.all([
-        client2.health.check(),
-        client2.settings.get()
-      ]);
-      if (getJsonFlag(cmd)) {
-        printJson3({ health, settings });
+      if (isShop) {
+        const { get: httpGet } = await import("./http-GIS2D4PG.js");
+        const me = await httpGet("/api/v1/auth/me", httpOpts);
+        if (getJsonFlag(cmd)) {
+          printJson3(me);
+        } else {
+          process.stdout.write("Azonos\xEDt\xE1s (bolt-token):\n");
+          printKv([
+            ["Felhaszn\xE1l\xF3:", me.name],
+            ["E-mail:", me.email],
+            ["Bolt:", me.shopName],
+            ["Token hat\xF3k\xF6r:", me.tokenScope],
+            ["Szerepk\xF6r:", me.role]
+          ]);
+          process.stdout.write("\nEl\xE9rhet\u0151 parancscsoportok ebben a m\xF3dban:\n");
+          process.stdout.write("  haszno products   haszno orders   haszno proposals list/propose\n");
+          process.stdout.write("  haszno shop       haszno account me / doctor\n");
+          if (me.tokenScope === "read") {
+            process.stdout.write("\nFigyelmeztet\xE9s: csak olvas\xE1si token \u2014 haszno proposals propose \xE9s write m\u0171veletek 403-at adnak.\n");
+          }
+        }
       } else {
-        process.stdout.write("Kapcsolat:\n");
-        printKv([["API:", health.ok ? "OK" : "HIBA"]]);
-        process.stdout.write("\nArazasi beallitasok:\n");
-        printKv([
-          ["Alac\u0131nzas (undercutPct):", `${settings.undercutPct}%`],
-          ["Min. haszon (minMarginPct):", `${settings.minMarginPct}%`],
-          ["AFA (vatPct):", `${settings.vatPct}%`],
-          ["Automatizmus:", settings.automationPaused ? "szunet" : "aktiv"]
+        const [health, settings] = await Promise.all([
+          client2.health.check(),
+          client2.settings.get()
         ]);
+        if (getJsonFlag(cmd)) {
+          printJson3({ health, settings });
+        } else {
+          process.stdout.write("Kapcsolat:\n");
+          printKv([["API:", health.ok ? "OK" : "HIBA"]]);
+          process.stdout.write("\nArazasi beallitasok:\n");
+          printKv([
+            ["Alac\u0131nzas (undercutPct):", `${settings.undercutPct}%`],
+            ["Min. haszon (minMarginPct):", `${settings.minMarginPct}%`],
+            ["AFA (vatPct):", `${settings.vatPct}%`],
+            ["Automatizmus:", settings.automationPaused ? "szunet" : "aktiv"]
+          ]);
+        }
       }
     } catch (err) {
       handleError2(err);
@@ -2395,6 +2449,78 @@ Token elmentve: ${configPath}
       handleError2(err);
     }
   });
+  account.command("me").description("Azonos\xEDt\xE1si adatok lek\xE9r\xE9se a szerverr\u0151l (GET /api/v1/auth/me) \u2014 bolt-token \xE9s egy\xE9b hiteles\xEDt\xE9si m\xF3dokkal egyar\xE1nt m\u0171k\xF6dik").action(async (_opts, cmd) => {
+    try {
+      const { get: httpGet } = await import("./http-GIS2D4PG.js");
+      const me = await httpGet("/api/v1/auth/me", httpOpts);
+      if (getJsonFlag(cmd)) {
+        printJson3(me);
+      } else {
+        process.stdout.write("Azonos\xEDt\xE1s:\n");
+        const rows = [
+          ["Felhaszn\xE1l\xF3:", me.name],
+          ["E-mail:", me.email],
+          ["Bolt:", me.shopName],
+          ["ShopID:", me.shopId],
+          ["Szerepk\xF6r:", me.role]
+        ];
+        if (me.tokenScope) rows.push(["Token hat\xF3k\xF6r:", me.tokenScope]);
+        printKv(rows);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  account.command("doctor").description("Hiteles\xEDt\xE9si m\xF3d, token hat\xF3k\xF6r \xE9s el\xE9rhet\u0151 parancsok ellen\u0151rz\xE9se").action(async (_opts, cmd) => {
+    const { resolveConnection: resolveConnection2 } = await import("./config-QM7YIT3B.js");
+    const { isShopToken: isShopToken2 } = await import("./http-GIS2D4PG.js");
+    const conn = resolveConnection2(httpOpts, process.env);
+    const isShop = isShopToken2(conn.apiKey);
+    const credentialMode = isShop ? "shop-token (Bearer)" : conn.apiKey ? "api-key (x-api-key)" : conn.basicAuth ? "Basic" : "nincs hiteles\xEDt\xE9s";
+    let apiOk = false;
+    let me = {};
+    let apiError;
+    try {
+      const { get: httpGet } = await import("./http-GIS2D4PG.js");
+      me = await httpGet("/api/v1/auth/me", httpOpts);
+      apiOk = true;
+    } catch (err) {
+      apiError = err instanceof Error ? err.message : String(err);
+    }
+    const groups = isShop ? ["products (read)", "orders (read)", "proposals list/propose", "shop (scope-gated)", "account me/doctor"] : ["products", "orders", "proposals (all)", "shop", "account", "rules", "feeds", "settings", "catalogue"];
+    const blocked = isShop ? ["proposals approve/reject/rollback", "rules", "feeds", "settings", "import-list", "billing"] : [];
+    const data = {
+      credentialMode,
+      apiOk,
+      apiError: apiError ?? null,
+      me,
+      availableCommandGroups: groups,
+      blockedForShopToken: blocked
+    };
+    if (getJsonFlag(cmd)) {
+      printJson3(data);
+    } else {
+      process.stdout.write(`Hiteles\xEDt\xE9si m\xF3d: ${credentialMode}
+`);
+      process.stdout.write(`API kapcsolat:   ${apiOk ? "OK" : `HIBA \u2014 ${apiError ?? "ismeretlen"}`}
+`);
+      if (me.name) process.stdout.write(`Felhaszn\xE1l\xF3:     ${me.name}${me.shopName ? ` (${me.shopName})` : ""}
+`);
+      if (me.tokenScope) process.stdout.write(`Token hat\xF3k\xF6r:   ${me.tokenScope}
+`);
+      process.stdout.write("\nEl\xE9rhet\u0151 parancscsoportok:\n");
+      for (const g of groups) process.stdout.write(`  \u2713 haszno ${g}
+`);
+      if (blocked.length > 0) {
+        process.stdout.write("\nLetiltott (bolt-token korl\xE1toz\xE1s):\n");
+        for (const b of blocked) process.stdout.write(`  \u2717 ${b}
+`);
+      }
+      if (!apiOk) {
+        process.stdout.write("\nTipp: futtasd a `haszno login` parancsot a hiteles\xEDt\xE9s meg\xFAj\xEDt\xE1s\xE1hoz.\n");
+      }
+    }
+  });
   account.command("version").description("CLI verzio es API kapcsolat ellenorzese / CLI version + connectivity check").action(async (_opts, cmd) => {
     let cliVersion = "0.1.0";
     try {
@@ -2422,7 +2548,7 @@ Token elmentve: ${configPath}
   const tokens = program2.command("tokens").description("API tokenek kezel\xE9se");
   tokens.command("list").description("Akt\xEDv API tokenek list\xE1ja (session-alap\xFA hiteles\xEDt\xE9s sz\xFCks\xE9ges)").action(async (_opts, cmd) => {
     try {
-      const { get: httpGet } = await import("./http-5DXIMCSB.js");
+      const { get: httpGet } = await import("./http-GIS2D4PG.js");
       const items = await httpGet("/api/v1/auth/tokens", httpOpts);
       if (getJsonFlag(cmd)) {
         printJson3(items);
@@ -2451,7 +2577,7 @@ Token elmentve: ${configPath}
       return;
     }
     try {
-      const { del: httpDel } = await import("./http-5DXIMCSB.js");
+      const { del: httpDel } = await import("./http-GIS2D4PG.js");
       const result = await httpDel(`/api/v1/auth/tokens/${id}`, httpOpts);
       if (getJsonFlag(cmd)) printJson3(result);
       else process.stdout.write(`Token #${id} visszavonva.
@@ -4131,10 +4257,155 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
       handleError2(err);
     }
   });
+  const partner = shop.command("partner").description("Partner profil \xE9s szindik\xE1ci\xF3s be\xE1ll\xEDt\xE1sok");
+  const partnerProfile = partner.command("profile").description("Partner profil megtekint\xE9se \xE9s szerkeszt\xE9se");
+  partnerProfile.command("show").description("Partner profil megjelen\xEDt\xE9se (GET /api/v1/shop/partner/profile) \u2014 hat\xF3k\xF6r: read").action(async (_opts2, cmd) => {
+    try {
+      const result = await shopClient2.partner.getProfile();
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else {
+        process.stdout.write(`Partner profil (refCode: ${result.refCode})
+`);
+        if (result.displayName) process.stdout.write(`  Megjelen\xEDt\xE9si n\xE9v: ${result.displayName}
+`);
+        if (result.bio) process.stdout.write(`  Bemutatkoz\xE1s: ${result.bio}
+`);
+        if (result.website) process.stdout.write(`  Weboldal: ${result.website}
+`);
+        process.stdout.write(`  Akt\xEDv szindik\xE1ci\xF3k: ${result.activeSyndications}
+`);
+        process.stdout.write(`  Feed URL: https://haszno.com/api/v1/shop/partner/${result.refCode}/feed.json
+`);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  partnerProfile.command("update").description("Partner profil friss\xEDt\xE9se (PUT /api/v1/shop/partner/profile) \u2014 hat\xF3k\xF6r: write").option("--display-name <n\xE9v>", "Megjelen\xEDt\xE9si n\xE9v").option("--bio <sz\xF6veg>", "Bemutatkoz\xF3 sz\xF6veg").option("--logo-url <url>", "Log\xF3 URL").option("--website <url>", "Weboldal URL").action(async (opts, cmd) => {
+    const body = {};
+    if (opts.displayName !== void 0) body.displayName = opts.displayName;
+    if (opts.bio !== void 0) body.bio = opts.bio;
+    if (opts.logoUrl !== void 0) body.logoUrl = opts.logoUrl;
+    if (opts.website !== void 0) body.website = opts.website;
+    if (Object.keys(body).length === 0) {
+      process.stderr.write("Legal\xE1bb egy opci\xF3t adj meg: --display-name, --bio, --logo-url, --website\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.partner.updateProfile(body);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Partner profil friss\xEDtve (refCode: ${result.refCode})
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const partnerSyndications = partner.command("syndications").description("Partnerk\xE9nt szindik\xE1lt hirdet\xE9sek kezel\xE9se");
+  partnerSyndications.command("list").description("Szindik\xE1lt hirdet\xE9sek list\xE1ja (GET /api/v1/shop/partner/syndications) \u2014 hat\xF3k\xF6r: read").action(async (_opts2, cmd) => {
+    try {
+      const items = await shopClient2.partner.listSyndications();
+      if (getJsonFlag2(cmd)) {
+        printJson3(items);
+      } else {
+        if (items.length === 0) {
+          process.stdout.write("Nincs szindik\xE1lt hirdet\xE9s.\n");
+          return;
+        }
+        process.stdout.write(`Szindik\xE1lt hirdet\xE9sek (${items.length}):
+`);
+        for (const s of items) {
+          process.stdout.write(`  #${s.adId}  ${String(s.markupPct) + "%".padStart(5)}  ${s.status.padEnd(10)}  ${s.adTitle}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  partnerSyndications.command("upsert <adId>").description("Szindik\xE1ci\xF3 l\xE9trehoz\xE1sa vagy friss\xEDt\xE9se (PUT /api/v1/shop/partner/syndications/:adId) \u2014 hat\xF3k\xF6r: write, keresked\u0151 elad\xF3i t\xEDpus sz\xFCks\xE9ges").requiredOption("--markup-pct <pct>", "Fel\xE1r sz\xE1zal\xE9ka (pl. 10 = +10%)").action(async (adIdStr, opts, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId) || adId <= 0) {
+      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    const markupPct = parseFloat(opts.markupPct);
+    if (isNaN(markupPct) || markupPct < 0) {
+      process.stderr.write("\xC9rv\xE9nytelen fel\xE1r: nem negat\xEDv sz\xE1mot adj meg.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.partner.upsertSyndication(adId, { markupPct });
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Szindik\xE1ci\xF3 #${adId} mentve (fel\xE1r: ${result.markupPct}%).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  partnerSyndications.command("remove <adId>").description("Szindik\xE1ci\xF3 t\xF6rl\xE9se (DELETE /api/v1/shop/partner/syndications/:adId) \u2014 hat\xF3k\xF6r: write").action(async (adIdStr, _opts2, cmd) => {
+    const adId = parseInt(adIdStr, 10);
+    if (isNaN(adId) || adId <= 0) {
+      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.partner.removeSyndication(adId);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Szindik\xE1ci\xF3 #${adId} t\xF6r\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const moderation = shop.command("moderation").description("Moder\xE1ci\xF3s d\xF6nt\xE9sek megtekint\xE9se \xE9s fellebbez\xE9se");
+  moderation.command("list").description("Moder\xE1ci\xF3s d\xF6nt\xE9sek list\xE1ja (GET /api/v1/shop/my/moderation) \u2014 hat\xF3k\xF6r: read").action(async (_opts2, cmd) => {
+    try {
+      const items = await shopClient2.moderation.list();
+      if (getJsonFlag2(cmd)) {
+        printJson3(items);
+      } else {
+        if (items.length === 0) {
+          process.stdout.write("Nincs moder\xE1ci\xF3s d\xF6nt\xE9s.\n");
+          return;
+        }
+        process.stdout.write(`Moder\xE1ci\xF3s d\xF6nt\xE9sek (${items.length}):
+`);
+        for (const m of items) {
+          const status = m.decision === "rejected" ? "ELUTAS\xCDTVA" : m.decision === "approved" ? "j\xF3v\xE1hagyva" : m.decision;
+          process.stdout.write(`  #${m.id}  hirdet\xE9s #${m.adId}  ${status.padEnd(12)}  ${m.adTitle}
+`);
+          if (m.reason) process.stdout.write(`         Ok: ${m.reason}
+`);
+        }
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  moderation.command("appeal <id>").description("Moder\xE1ci\xF3s d\xF6nt\xE9s elleni fellebbez\xE9s (POST /api/v1/shop/my/moderation/:id/appeal) \u2014 hat\xF3k\xF6r: write").option("--reason <sz\xF6veg>", "Fellebbez\xE9s indokl\xE1sa").action(async (idStr, opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id) || id <= 0) {
+      process.stderr.write("\xC9rv\xE9nytelen moder\xE1ci\xF3-azonos\xEDt\xF3.\n");
+      process.exit(2);
+      return;
+    }
+    try {
+      const result = await shopClient2.moderation.appeal(id, opts.reason);
+      if (getJsonFlag2(cmd)) printJson3(result);
+      else process.stdout.write(`Fellebbez\xE9s beny\xFAjtva (#${result.id}).
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
 }
 
 // src/index.ts
-var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.1.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
+var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.4.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
 function buildClient(opts) {
   return createClient({
     baseUrl: opts.apiUrl,
