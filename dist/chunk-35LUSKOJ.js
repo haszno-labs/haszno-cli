@@ -17,12 +17,25 @@ var HasznoApiError = class extends Error {
   requestId;
 };
 
+// src/client/tool-context.ts
+var TOOL_HEADER_RE = /^[a-zA-Z0-9_.:\- ]{1,80}$/;
+var _currentCommandPath;
+function setCurrentCommandPath(path) {
+  _currentCommandPath = path;
+}
+function currentToolName() {
+  if (_currentCommandPath !== void 0 && TOOL_HEADER_RE.test(_currentCommandPath)) {
+    return _currentCommandPath;
+  }
+  return void 0;
+}
+
 // src/client/http.ts
 var SHOP_TOKEN_PREFIX = "haszno_";
 function isShopToken(key) {
   return !!key?.startsWith(SHOP_TOKEN_PREFIX);
 }
-var CLI_VERSION = "0.3.0";
+var CLI_VERSION = "0.5.0";
 function buildAuthHeader(conn) {
   if (conn.apiKey) {
     if (isShopToken(conn.apiKey)) return { Authorization: `Bearer ${conn.apiKey}` };
@@ -44,11 +57,13 @@ async function request(method, path, body, opts) {
   const maxRetries = opts.maxRetries ?? 3;
   const retryDelayMs = opts.retryDelayMs ?? 500;
   const timeoutMs = opts.timeoutMs ?? 3e4;
+  const toolName = currentToolName();
   const headers = {
     "Content-Type": "application/json",
     "Accept": "application/json",
     "User-Agent": `haszno-cli/${CLI_VERSION}`,
-    ...buildAuthHeader(conn)
+    ...buildAuthHeader(conn),
+    ...toolName ? { "X-Haszno-Tool": toolName } : {}
   };
   let lastError;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -115,6 +130,7 @@ function del(path, opts) {
 
 export {
   HasznoApiError,
+  setCurrentCommandPath,
   SHOP_TOKEN_PREFIX,
   isShopToken,
   request,
@@ -124,4 +140,4 @@ export {
   patch,
   del
 };
-//# sourceMappingURL=chunk-VM33OE5G.js.map
+//# sourceMappingURL=chunk-35LUSKOJ.js.map
