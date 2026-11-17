@@ -596,5 +596,14 @@ export interface ShopModuleList {
 
 export interface ModuleActivateResult {
   status: ModuleSubscriptionStatus
-  checkoutUrl?: string | null
+  moduleId: string
+  /** Message for immediately-activated (free) modules. */
+  message?: string
+  /** Present for billable modules (status=pending) — user must visit checkout.redirectUrl to complete payment. */
+  checkout?: {
+    redirectUrl: string
+    orderRef: string
+    provider: string
+    amountHuf: number
+  } | null
 }

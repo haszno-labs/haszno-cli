@@ -5066,16 +5066,19 @@ function registerModulesCommands(program2, client2) {
       const result = await client2.modules.activate(moduleId);
       if (isJsonMode10(cmd)) {
         process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-      } else if (result.checkoutUrl) {
+      } else if (result.checkout?.redirectUrl) {
         console.log(`Modul: ${moduleId}`);
         console.log(`\xC1llapot: ${result.status}`);
+        console.log(`\xD6sszeg: ${result.checkout.amountHuf} HUF`);
+        console.log(`Rendel\xE9si sz\xE1m: ${result.checkout.orderRef}`);
         console.log(`
 Fizet\xE9si link:
-  ${result.checkoutUrl}`);
+  ${result.checkout.redirectUrl}`);
         console.log("\nNyisd meg a linket a b\xF6ng\xE9sz\u0151ben a fizet\xE9s befejez\xE9s\xE9hez.");
         console.log("A modul csak a sikeres fizet\xE9s ut\xE1n akt\xEDv.");
       } else {
         console.log(`Modul aktiv\xE1lva: ${moduleId} (\xE1llapot: ${result.status})`);
+        if (result.message) console.log(result.message);
       }
     } catch (err) {
       console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);

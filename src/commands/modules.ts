@@ -137,14 +137,17 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
         const result = await client.modules.activate(moduleId)
         if (isJsonMode(cmd)) {
           process.stdout.write(JSON.stringify(result, null, 2) + '\n')
-        } else if (result.checkoutUrl) {
+        } else if (result.checkout?.redirectUrl) {
           console.log(`Modul: ${moduleId}`)
           console.log(`Állapot: ${result.status}`)
-          console.log(`\nFizetési link:\n  ${result.checkoutUrl}`)
+          console.log(`Összeg: ${result.checkout.amountHuf} HUF`)
+          console.log(`Rendelési szám: ${result.checkout.orderRef}`)
+          console.log(`\nFizetési link:\n  ${result.checkout.redirectUrl}`)
           console.log('\nNyisd meg a linket a böngészőben a fizetés befejezéséhez.')
           console.log('A modul csak a sikeres fizetés után aktív.')
         } else {
           console.log(`Modul aktiválva: ${moduleId} (állapot: ${result.status})`)
+          if (result.message) console.log(result.message)
         }
       } catch (err) {
         console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`)
