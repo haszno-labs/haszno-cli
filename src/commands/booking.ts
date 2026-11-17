@@ -151,8 +151,8 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
         const rawText = await readStdinOrFile(source)
         const body = parseJson<Record<string, unknown>>(rawText, source)
 
-        // Without --yes it's always a dry run
-        const dryRun = !opts.yes
+        // --dry-run overrides --yes; without --yes it's always a dry run
+        const dryRun = !!opts.dryRun || !opts.yes
 
         const result = await client.booking.applySetup(body, dryRun)
         if (getJsonFlag(cmd)) {
@@ -340,7 +340,15 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
         }
         const body: Partial<Omit<BookingService, 'id'>> = {}
         if (opts.name !== undefined) body.name = opts.name
-        if (opts.duration !== undefined) body.durationMin = parseInt(opts.duration, 10)
+        if (opts.duration !== undefined) {
+          const dur = parseInt(opts.duration, 10)
+          if (isNaN(dur) || dur <= 0) {
+            process.stderr.write('--duration értéke pozitív egész szám kell legyen.\n')
+            process.exitCode = 2
+            return
+          }
+          body.durationMin = dur
+        }
         if (opts.price !== undefined) body.priceGross = parseInt(opts.price, 10)
         if (opts.description !== undefined) body.description = opts.description
         if (opts.active !== undefined) body.active = opts.active

@@ -5256,7 +5256,7 @@ K\xF6vetkez\u0151 l\xE9p\xE9s:
     try {
       const rawText = await readStdinOrFile(source);
       const body = parseJson(rawText, source);
-      const dryRun = !opts.yes;
+      const dryRun = !!opts.dryRun || !opts.yes;
       const result = await client2.booking.applySetup(body, dryRun);
       if (getJsonFlag3(cmd)) {
         printJson3(result);
@@ -5383,7 +5383,15 @@ ${fmtService(result)}
       }
       const body = {};
       if (opts.name !== void 0) body.name = opts.name;
-      if (opts.duration !== void 0) body.durationMin = parseInt(opts.duration, 10);
+      if (opts.duration !== void 0) {
+        const dur = parseInt(opts.duration, 10);
+        if (isNaN(dur) || dur <= 0) {
+          process.stderr.write("--duration \xE9rt\xE9ke pozit\xEDv eg\xE9sz sz\xE1m kell legyen.\n");
+          process.exitCode = 2;
+          return;
+        }
+        body.durationMin = dur;
+      }
       if (opts.price !== void 0) body.priceGross = parseInt(opts.price, 10);
       if (opts.description !== void 0) body.description = opts.description;
       if (opts.active !== void 0) body.active = opts.active;
