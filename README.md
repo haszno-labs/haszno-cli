@@ -263,6 +263,37 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 
 ---
 
+## Vászon — your own Claude Code in the chat panel
+
+The chat panel of the Vászon page (haszno.com/app/vaszon) can drive the Claude Code running on your
+machine, with **your own Claude login** — no API key. The CLI starts a local bridge that talks to
+Claude Code through the [ACP adapter](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
+and hands it the Haszno MCP server.
+
+```bash
+npm install -g @agentclientprotocol/claude-agent-acp   # once: the adapter
+haszno login                                            # once: shop token
+haszno vaszon --open                                    # start the bridge + open the pairing link
+```
+
+Panel states: **starting**, **ready**, **sign-in needed** (`claude-agent-acp --cli auth login --claudeai`),
+**not installed** (with the install command).
+
+Security:
+
+- The bridge listens on `127.0.0.1` only; every request needs the pairing token (in the link), and
+  only the Haszno website may call it.
+- The Claude Code session starts with **no built-in tools** (no shell, no file access) and without
+  your own Claude Code settings or MCP servers: it reaches the Haszno tools only.
+- Modifying calls ask for approval in the panel; read-only calls run on their own.
+- No key is handled: Claude Code runs with its own login, and the shop token stays on your machine.
+
+| Flag | Description |
+|---|---|
+| `--port <port>` | local port (default: 47600) |
+| `--open` | open the pairing link in the browser |
+| `--allow-origin <origin...>` | extra allowed web origin (for development) |
+
 ## Agent ergonomics
 
 ### Error output for agents and swarms

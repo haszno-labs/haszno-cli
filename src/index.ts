@@ -14,6 +14,7 @@
  *   haszno proposals approve --ids 1,2,3
  *   haszno rules list
  *   haszno rules run 2
+ *   haszno vaszon                 (local bridge: the Vászon chat drives your own Claude Code)
  */
 import { Command } from 'commander'
 import { createClient } from './client/index.js'
@@ -36,12 +37,13 @@ import { registerActionsCommands } from './commands/actions.js'
 import { registerShopCommands } from './commands/shop.js'
 import { registerModulesCommands } from './commands/modules.js'
 import { registerBookingCommands } from './commands/booking.js'
+import { registerVaszonCommands } from './commands/vaszon.js'
 import { createShopClient } from './client/shop.js'
 
 const program = new Command()
   .name('haszno')
   .description('Haszno dropshipping CLI')
-  .version('0.6.0')
+  .version('0.7.0')
   .option('--json', 'output machine-readable JSON')
   .option('--api-url <url>', 'Haszno API base URL (overrides HASZNO_API_URL)')
   .option('--api-key <key>', 'Haszno API key (overrides HASZNO_API_KEY)')
@@ -85,6 +87,7 @@ registerActionsCommands(program, client)
 registerShopCommands(program, shopClient)
 registerModulesCommands(program, client)
 registerBookingCommands(program, client)
+registerVaszonCommands(program, sharedOpts, '0.7.0')
 
 // Record the invoked command path as "cli <subcommand path>" before each action.
 // This value is picked up by http.ts to populate the X-Haszno-Tool request header.
