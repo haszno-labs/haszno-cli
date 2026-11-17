@@ -198,6 +198,21 @@ describe('VaszonAgent — turns and permissions', () => {
     expect(events.find((e) => e.type === 'permission_resolved')).toMatchObject({ id: 't1', decision: 'reject' })
   })
 
+  it('refuses a permission request that arrives from a replaced adapter', async () => {
+    const first = fakeAdapter(handshake())
+    const second = fakeAdapter(handshake())
+    const transports = [first.transport, second.transport]
+    const agent = newAgent(() => transports.shift()!)
+    const events: LoggedEvent[] = []
+    agent.onEvent((e) => events.push(e))
+    await agent.start()
+    await agent.start()
+    first.api.send({ id: 903, method: 'session/request_permission', params: { toolCall: toolCall('mcp__haszno__haszno_rules_run', { id: 2 }), options } })
+    await until(() => first.received.some((m) => m.id === 903))
+    expect(first.received.find((m) => m.id === 903)!.error).toMatchObject({ code: -32099 })
+    expect(events.some((e) => e.type === 'permission')).toBe(false)
+  })
+
   it('refuses a prompt while not ready', async () => {
     const agent = newAgent(() => fakeAdapter(() => {}).transport, null)
     await agent.start()

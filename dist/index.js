@@ -5876,7 +5876,10 @@ var VaszonAgent = class {
       (method, params) => {
         if (generation === this.generation) this.handleNotification(method, params);
       },
-      (method, params) => this.handleRequest(method, params),
+      (method, params) => (
+        // A request still in the pipe of a replaced adapter must never reach the user as a prompt.
+        generation === this.generation ? this.handleRequest(method, params) : Promise.reject({ code: -32099, message: "Stale session" })
+      ),
       (reason) => {
         if (generation !== this.generation) return;
         this.conn = null;
@@ -6109,7 +6112,7 @@ function createBridgeServer(opts) {
   const allowed = new Set(opts.allowedOrigins);
   const epoch = randomBytes(8).toString("hex");
   const statusBody = () => ({ app: "haszno-vaszon", version, shop, epoch, ...agent.state() });
-  return createServer(async (req, res) => {
+  const handle = async (req, res) => {
     const origin = req.headers.origin;
     const cors = { Vary: "Origin" };
     if (origin && allowed.has(origin)) {
@@ -6188,6 +6191,12 @@ data: ${JSON.stringify(data)}
       default:
         return json(404, { error: "not_found" });
     }
+  };
+  return createServer((req, res) => {
+    handle(req, res).catch(() => {
+      if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "internal" }));
+    });
   });
 }
 

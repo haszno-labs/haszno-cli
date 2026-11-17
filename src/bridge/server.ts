@@ -81,7 +81,7 @@ export function createBridgeServer(opts: BridgeServerOptions): Server {
   const epoch = randomBytes(8).toString('hex')
   const statusBody = () => ({ app: 'haszno-vaszon', version, shop, epoch, ...agent.state() })
 
-  return createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const origin = req.headers.origin
     const cors: Record<string, string> = { Vary: 'Origin' }
     if (origin && allowed.has(origin)) {
@@ -163,5 +163,13 @@ export function createBridgeServer(opts: BridgeServerOptions): Server {
       default:
         return json(404, { error: 'not_found' })
     }
+  }
+
+  // An unexpected throw must not take the bridge down as an unhandled rejection.
+  return createServer((req, res) => {
+    handle(req, res).catch(() => {
+      if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: 'internal' }))
+    })
   })
 }

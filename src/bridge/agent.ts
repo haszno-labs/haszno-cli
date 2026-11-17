@@ -179,7 +179,11 @@ export class VaszonAgent {
     const conn = new AcpConnection(
       transport,
       (method, params) => { if (generation === this.generation) this.handleNotification(method, params) },
-      (method, params) => this.handleRequest(method, params),
+      (method, params) =>
+        // A request still in the pipe of a replaced adapter must never reach the user as a prompt.
+        generation === this.generation
+          ? this.handleRequest(method, params)
+          : Promise.reject({ code: -32099, message: 'Stale session' } satisfies RpcError),
       (reason) => {
         if (generation !== this.generation) return
         this.conn = null
