@@ -202,6 +202,24 @@ haszno products list --json | jq '.[] | .name'
 | `haszno feeds import-supplier ...` | hagyományos | Szállítói feed import |
 | `haszno ideas list` | hagyományos | AI termékötletek |
 | `haszno orders list` | mindkét | Rendelések |
+| `haszno booking status` | bolt-token | Foglalási ellenőrzőlista + következő lépés |
+| `haszno booking export` | bolt-token | Teljes foglalási konfiguráció JSON-ban |
+| `haszno booking apply <fájl\|->` | bolt-token | Konfig alkalmazása (alapért. dry-run; `--yes` a mentéshez) |
+| `haszno booking theme set ...` | bolt-token (write) | Foglalási oldal megjelenésének testreszabása |
+| `haszno booking service list` | bolt-token | Szolgáltatások listája |
+| `haszno booking service add ...` | bolt-token (write) | Új szolgáltatás |
+| `haszno booking service update <id>` | bolt-token (write) | Szolgáltatás módosítása |
+| `haszno booking service remove <id>` | bolt-token (write) | Szolgáltatás törlése |
+| `haszno booking resource list` | bolt-token | Erőforrások listája |
+| `haszno booking resource add ...` | bolt-token (write) | Új erőforrás |
+| `haszno booking resource update <id>` | bolt-token (write) | Erőforrás módosítása |
+| `haszno booking resource remove <id>` | bolt-token (write) | Erőforrás törlése |
+| `haszno booking hours set <fájl\|->` | bolt-token (write) | Nyitvatartás beállítása JSON-ból |
+| `haszno booking closure add ...` | bolt-token (write) | Zárás / kivétel nap hozzáadása |
+| `haszno booking closure remove <id>` | bolt-token (write) | Zárás törlése |
+| `haszno booking publish --yes` | bolt-token (write) | Foglalási oldal közzététele |
+| `haszno booking unpublish --yes` | bolt-token (write) | Foglalási oldal visszavonása |
+| `haszno booking appointments --from --to` | bolt-token | Időpontok listája dátumtartományra |
 
 ---
 

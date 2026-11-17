@@ -607,3 +607,92 @@ export interface ModuleActivateResult {
     amountHuf: number
   } | null
 }
+
+// ── Booking module types ───────────────────────────────────────────────────────
+
+export interface BookingTheme {
+  accent?: string | null
+  background?: 'light' | 'soft' | 'dark' | null
+  radius?: 'sharp' | 'soft' | 'round' | null
+  font?: 'inter' | 'serif' | 'rounded' | null
+  logoUrl?: string | null
+  coverUrl?: string | null
+  headline?: string | null
+  buttonLabel?: string | null
+}
+
+export interface BookingService {
+  id: number
+  name: string
+  durationMin: number
+  priceGross: number | null
+  description?: string | null
+  active: boolean
+}
+
+export interface BookingResource {
+  id: number
+  name: string
+  description?: string | null
+  active: boolean
+}
+
+export interface BookingDayHours {
+  day: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+  open: string | null
+  close: string | null
+}
+
+export interface BookingException {
+  id: number
+  date: string
+  label?: string | null
+  open?: string | null
+  close?: string | null
+}
+
+export interface BookingChecklistItem {
+  key: string
+  label: string
+  done: boolean
+}
+
+export interface BookingSetup {
+  page: {
+    published: boolean
+    theme: BookingTheme
+  }
+  services: BookingService[]
+  resources: BookingResource[]
+  hours: BookingDayHours[]
+  exceptions: BookingException[]
+  checklist: BookingChecklistItem[]
+  nextStep: string | null
+}
+
+export interface BookingApplyResult {
+  dryRun: boolean
+  changes: string[]
+  applied?: number
+}
+
+export interface BookingPublishResult {
+  published: boolean
+}
+
+export interface BookingAppointment {
+  id: number
+  serviceId: number
+  serviceName: string
+  resourceId: number | null
+  resourceName: string | null
+  date: string
+  startTime: string
+  endTime: string
+  customerName: string
+  customerEmail: string | null
+  customerPhone: string | null
+  status: string
+  notes?: string | null
+  createdAt: string
+}

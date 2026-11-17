@@ -1,6 +1,6 @@
 {
   "name": "@haszno/cli",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Haszno CLI — query and act on your dropshipping data from the terminal",
   "license": "MIT",
   "type": "module",

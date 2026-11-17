@@ -242,6 +242,24 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 | `haszno shop partner syndications remove <adId>` | both (write) | Remove syndication |
 | `haszno shop moderation list` | both | List moderation decisions |
 | `haszno shop moderation appeal <id>` | both (write) | Appeal a moderation decision |
+| `haszno booking status` | shop token | Booking setup checklist + next step |
+| `haszno booking export` | shop token | Export full booking config as JSON |
+| `haszno booking apply <file\|->` | shop token | Apply config (dry-run by default; `--yes` to save) |
+| `haszno booking theme set ...` | shop token (write) | Update booking page theme |
+| `haszno booking service list` | shop token | List booking services |
+| `haszno booking service add ...` | shop token (write) | Add a service |
+| `haszno booking service update <id>` | shop token (write) | Update a service |
+| `haszno booking service remove <id>` | shop token (write) | Remove a service |
+| `haszno booking resource list` | shop token | List resources |
+| `haszno booking resource add ...` | shop token (write) | Add a resource |
+| `haszno booking resource update <id>` | shop token (write) | Update a resource |
+| `haszno booking resource remove <id>` | shop token (write) | Remove a resource |
+| `haszno booking hours set <file\|->` | shop token (write) | Set opening hours from JSON |
+| `haszno booking closure add ...` | shop token (write) | Add a closure / exception day |
+| `haszno booking closure remove <id>` | shop token (write) | Remove a closure |
+| `haszno booking publish --yes` | shop token (write) | Publish the booking page |
+| `haszno booking unpublish --yes` | shop token (write) | Unpublish the booking page |
+| `haszno booking appointments --from --to` | shop token | List appointments in a date range |
 
 ---
 
