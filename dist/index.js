@@ -167,6 +167,13 @@ function createShopTokenClient(opts) {
         return get(`/api/agent/actions${suffix}`, o);
       },
       proposeAction: (body) => post("/api/agent/actions", body, o)
+    },
+    modules: {
+      listPrices: () => get("/api/shop/modules/prices", o),
+      listMy: () => get("/api/shop/modules/my", o),
+      activate: (moduleId) => post(`/api/shop/modules/${moduleId}/activate`, null, o),
+      cancel: (moduleId) => post(`/api/shop/modules/${moduleId}/cancel`, null, o),
+      resume: (moduleId) => post(`/api/shop/modules/${moduleId}/resume`, null, o)
     }
   };
 }
@@ -327,6 +334,13 @@ function createLegacyClient(opts) {
       postFindings: notSupportedLegacy("manager.postFindings"),
       listActions: notSupportedLegacy("manager.listActions"),
       proposeAction: notSupportedLegacy("manager.proposeAction")
+    },
+    modules: {
+      listPrices: () => get("/api/shop/modules/prices", o),
+      listMy: () => get("/api/shop/modules/my", o),
+      activate: (moduleId) => post(`/api/shop/modules/${moduleId}/activate`, null, o),
+      cancel: (moduleId) => post(`/api/shop/modules/${moduleId}/cancel`, null, o),
+      resume: (moduleId) => post(`/api/shop/modules/${moduleId}/resume`, null, o)
     }
   };
 }
@@ -4954,8 +4968,171 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
   });
 }
 
+// src/commands/modules.ts
+var MODULE_IDS = [
+  "webshop",
+  "dropshipping_supplier",
+  "fitness",
+  "booking_salon",
+  "booking_clinic",
+  "booking_other",
+  "restaurant"
+];
+function isJsonMode10(cmd) {
+  let p = cmd;
+  while (p) {
+    const opts = p.opts();
+    if (opts.json) return true;
+    p = p.parent;
+  }
+  return false;
+}
+function printPricesTable(modules) {
+  const headers = ["Modul", "Havi \xE1r (HUF)", "Sz\xE1ml\xE1zott"];
+  const rows = modules.map((m) => [
+    m.moduleId,
+    m.priceHuf === 0 ? "ingyenes" : m.priceHuf.toLocaleString("hu-HU"),
+    m.billable ? "igen" : "nem"
+  ]);
+  const all = [headers, ...rows];
+  const widths = headers.map((_, ci) => Math.max(...all.map((r) => (r[ci] ?? "").length)));
+  const sep = widths.map((w) => "-".repeat(w)).join("-+-");
+  const fmtRow = (r) => r.map((c, i) => (c ?? "").padEnd(widths[i])).join(" | ");
+  console.log(fmtRow(headers));
+  console.log(sep);
+  for (const row of rows) console.log(fmtRow(row));
+}
+function printSubscriptionsTable(subs) {
+  if (subs.length === 0) {
+    console.log("Nincs akt\xEDv modul.");
+    return;
+  }
+  const headers = ["Modul", "\xC1llapot", "Aktiv\xE1lva", "Lej\xE1r"];
+  const fmt4 = (d) => d ? new Date(d).toLocaleDateString("hu-HU", { timeZone: "Europe/Budapest" }) : "-";
+  const rows = subs.map((s) => [s.moduleId, s.status, fmt4(s.activatedAt), fmt4(s.expiresAt)]);
+  const all = [headers, ...rows];
+  const widths = headers.map((_, ci) => Math.max(...all.map((r) => (r[ci] ?? "").length)));
+  const sep = widths.map((w) => "-".repeat(w)).join("-+-");
+  const fmtRow = (r) => r.map((c, i) => (c ?? "").padEnd(widths[i])).join(" | ");
+  console.log(fmtRow(headers));
+  console.log(sep);
+  for (const row of rows) console.log(fmtRow(row));
+}
+function registerModulesCommands(program2, client2) {
+  const modules = program2.command("modules").description("Workspace modulok kezel\xE9se");
+  modules.command("list").description("Modulok \xE1ra \xE9s el\xE9rhet\u0151s\xE9ge (nyilv\xE1nos)").action(async (_opts, cmd) => {
+    try {
+      const result = await client2.modules.listPrices();
+      if (isJsonMode10(cmd)) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      } else {
+        console.log(`Sz\xE1ml\xE1z\xE1si id\u0151szak: ${result.periodDays} nap | P\xE9nznem: ${result.currency}
+`);
+        printPricesTable(result.modules);
+      }
+    } catch (err) {
+      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+  modules.command("status").description("Az aktu\xE1lis bolt moduljainak list\xE1ja (bejelentkez\xE9s sz\xFCks\xE9ges)").action(async (_opts, cmd) => {
+    try {
+      const result = await client2.modules.listMy();
+      if (isJsonMode10(cmd)) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      } else {
+        console.log(`Tulajdonos: ${result.isOwner ? "igen" : "nem"}
+`);
+        printSubscriptionsTable(result.modules);
+      }
+    } catch (err) {
+      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+  modules.command("enable <moduleId>").description("Modul aktiv\xE1l\xE1sa (sz\xE1ml\xE1zott modul eset\xE9n SimplePay fizet\xE9si linket ad vissza)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (moduleId, opts, cmd) => {
+    if (!MODULE_IDS.includes(moduleId)) {
+      console.error(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!opts.yes) {
+      console.log(`Modul aktiv\xE1l\xE1sa: ${moduleId}`);
+      console.log("Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.");
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const result = await client2.modules.activate(moduleId);
+      if (isJsonMode10(cmd)) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      } else if (result.checkoutUrl) {
+        console.log(`Modul: ${moduleId}`);
+        console.log(`\xC1llapot: ${result.status}`);
+        console.log(`
+Fizet\xE9si link:
+  ${result.checkoutUrl}`);
+        console.log("\nNyisd meg a linket a b\xF6ng\xE9sz\u0151ben a fizet\xE9s befejez\xE9s\xE9hez.");
+        console.log("A modul csak a sikeres fizet\xE9s ut\xE1n akt\xEDv.");
+      } else {
+        console.log(`Modul aktiv\xE1lva: ${moduleId} (\xE1llapot: ${result.status})`);
+      }
+    } catch (err) {
+      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+  modules.command("cancel <moduleId>").description("Modul el\u0151fizet\xE9s lemond\xE1sa (az id\u0151szak v\xE9g\xE9ig akt\xEDv marad)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (moduleId, opts, cmd) => {
+    if (!MODULE_IDS.includes(moduleId)) {
+      console.error(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!opts.yes) {
+      console.log(`Modul lemond\xE1sa: ${moduleId}. Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const result = await client2.modules.cancel(moduleId);
+      if (isJsonMode10(cmd)) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      } else {
+        console.log(`Modul lemondva: ${result.moduleId} (\xE1llapot: ${result.status})`);
+        console.log("A modul az el\u0151fizet\xE9si id\u0151szak v\xE9g\xE9ig akt\xEDv marad.");
+      }
+    } catch (err) {
+      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+  modules.command("resume <moduleId>").description("Lemondott modul \xFAjraind\xEDt\xE1sa (csak akkor, ha az id\u0151szak m\xE9g nem j\xE1rt le)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (moduleId, opts, cmd) => {
+    if (!MODULE_IDS.includes(moduleId)) {
+      console.error(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!opts.yes) {
+      console.log(`Modul \xFAjraind\xEDt\xE1sa: ${moduleId}. Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const result = await client2.modules.resume(moduleId);
+      if (isJsonMode10(cmd)) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      } else {
+        console.log(`Modul \xFAjraind\xEDtva: ${result.moduleId} (\xE1llapot: ${result.status})`);
+      }
+    } catch (err) {
+      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+}
+
 // src/index.ts
-var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.4.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
+var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.5.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
 function buildClient(opts) {
   return createClient({
     baseUrl: opts.apiUrl,
@@ -4988,5 +5165,6 @@ registerReportCommands(program, client);
 registerResearchCommands(program, client);
 registerActionsCommands(program, client);
 registerShopCommands(program, shopClient);
+registerModulesCommands(program, client);
 program.parse();
 //# sourceMappingURL=index.js.map

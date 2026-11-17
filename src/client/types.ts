@@ -564,3 +564,37 @@ export interface BlogListResult {
   page: number
   perPage: number
 }
+
+// ── Module types ──────────────────────────────────────────────────────────────
+
+export interface ModulePrice {
+  moduleId: string
+  priceHuf: number
+  billable: boolean
+}
+
+export interface ModulePriceList {
+  currency: 'HUF'
+  periodDays: number
+  modules: ModulePrice[]
+}
+
+export type ModuleSubscriptionStatus = 'pending' | 'active' | 'cancelled' | 'ended'
+
+export interface ModuleSubscription {
+  moduleId: string
+  status: ModuleSubscriptionStatus
+  activatedAt: string | null
+  expiresAt: string | null
+  cancelledAt: string | null
+}
+
+export interface ShopModuleList {
+  isOwner: boolean
+  modules: ModuleSubscription[]
+}
+
+export interface ModuleActivateResult {
+  status: ModuleSubscriptionStatus
+  checkoutUrl?: string | null
+}
