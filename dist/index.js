@@ -175,6 +175,24 @@ function createShopTokenClient(opts) {
       activate: (moduleId) => post(`/api/shop/modules/${moduleId}/activate`, null, o),
       cancel: (moduleId) => post(`/api/shop/modules/${moduleId}/cancel`, null, o),
       resume: (moduleId) => post(`/api/shop/modules/${moduleId}/resume`, null, o)
+    },
+    booking: {
+      getSetup: () => get("/api/agent/booking/setup", o),
+      applySetup: (body, dryRun) => put("/api/agent/booking/setup", dryRun ? { ...body, dryRun: true } : body, o),
+      setTheme: (partial) => put("/api/agent/booking/theme", partial, o),
+      listServices: () => get("/api/agent/booking/services", o),
+      createService: (body) => post("/api/agent/booking/services", body, o),
+      updateService: (id, body) => patch(`/api/agent/booking/services/${id}`, body, o),
+      deleteService: (id) => del(`/api/agent/booking/services/${id}`, o),
+      listResources: () => get("/api/agent/booking/resources", o),
+      createResource: (body) => post("/api/agent/booking/resources", body, o),
+      updateResource: (id, body) => patch(`/api/agent/booking/resources/${id}`, body, o),
+      deleteResource: (id) => del(`/api/agent/booking/resources/${id}`, o),
+      setHours: (hours) => put("/api/agent/booking/hours", { hours }, o),
+      addClosure: (body) => post("/api/agent/booking/exceptions", body, o),
+      removeClosure: (id) => del(`/api/agent/booking/exceptions/${id}`, o),
+      publish: (published) => post("/api/agent/booking/publish", { published }, o),
+      listAppointments: (params) => get(`/api/agent/booking/appointments?from=${params.from}&to=${params.to}`, o)
     }
   };
 }
@@ -342,6 +360,25 @@ function createLegacyClient(opts) {
       activate: (moduleId) => post(`/api/shop/modules/${moduleId}/activate`, null, o),
       cancel: (moduleId) => post(`/api/shop/modules/${moduleId}/cancel`, null, o),
       resume: (moduleId) => post(`/api/shop/modules/${moduleId}/resume`, null, o)
+    },
+    // booking.* requires a shop token — legacy keys have no access
+    booking: {
+      getSetup: notSupportedLegacy("booking.getSetup"),
+      applySetup: notSupportedLegacy("booking.applySetup"),
+      setTheme: notSupportedLegacy("booking.setTheme"),
+      listServices: notSupportedLegacy("booking.listServices"),
+      createService: notSupportedLegacy("booking.createService"),
+      updateService: notSupportedLegacy("booking.updateService"),
+      deleteService: notSupportedLegacy("booking.deleteService"),
+      listResources: notSupportedLegacy("booking.listResources"),
+      createResource: notSupportedLegacy("booking.createResource"),
+      updateResource: notSupportedLegacy("booking.updateResource"),
+      deleteResource: notSupportedLegacy("booking.deleteResource"),
+      setHours: notSupportedLegacy("booking.setHours"),
+      addClosure: notSupportedLegacy("booking.addClosure"),
+      removeClosure: notSupportedLegacy("booking.removeClosure"),
+      publish: notSupportedLegacy("booking.publish"),
+      listAppointments: notSupportedLegacy("booking.listAppointments")
     }
   };
 }
@@ -5135,8 +5172,502 @@ Fizet\xE9si link:
   });
 }
 
+// src/commands/booking.ts
+import { readFileSync as readFileSync4 } from "fs";
+function getJsonFlag3(cmd) {
+  try {
+    return cmd.optsWithGlobals().json === true;
+  } catch {
+    return false;
+  }
+}
+async function readStdinOrFile(source) {
+  if (source === "-") {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    return Buffer.concat(chunks).toString("utf8").trim();
+  }
+  return readFileSync4(source, "utf8").trim();
+}
+function parseJson(text, label) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    process.stderr.write(`\xC9rv\xE9nytelen JSON (${label}).
+`);
+    process.exit(2);
+  }
+}
+function fmtService(s) {
+  const price = s.priceGross != null ? `${s.priceGross.toLocaleString("hu-HU")} Ft` : "\xE1r nincs";
+  const active = s.active ? "" : " [inakt\xEDv]";
+  return `  #${String(s.id).padStart(4)}  ${s.name.padEnd(30)} ${String(s.durationMin).padStart(3)} perc  ${price}${active}`;
+}
+function fmtResource(r) {
+  const active = r.active ? "" : " [inakt\xEDv]";
+  return `  #${String(r.id).padStart(4)}  ${r.name}${active}${r.description ? `  \u2014 ${r.description}` : ""}`;
+}
+function fmtAppointment(a) {
+  return `  ${a.date} ${a.startTime}\u2013${a.endTime}  ${a.serviceName.padEnd(28)}  ${a.customerName}  ${a.status}`;
+}
+function registerBookingCommands(program2, client2) {
+  const booking = program2.command("booking").description("Foglal\xE1si modul konfigur\xE1l\xE1sa \xE9s lek\xE9rdez\xE9se (bolt API-token sz\xFCks\xE9ges)");
+  booking.command("status").description("Ellen\u0151rz\u0151lista \xE9s k\xF6vetkez\u0151 teend\u0151").action(async (_opts, cmd) => {
+    try {
+      const setup = await client2.booking.getSetup();
+      if (getJsonFlag3(cmd)) {
+        printJson3({ checklist: setup.checklist, nextStep: setup.nextStep });
+        return;
+      }
+      const published = setup.page.published ? "k\xF6zz\xE9t\xE9ve" : "v\xE1zlat";
+      process.stdout.write(`Foglal\xE1si oldal \xE1llapota: ${published}
+
+`);
+      for (const item of setup.checklist) {
+        const mark = item.done ? "[x]" : "[ ]";
+        process.stdout.write(`  ${mark}  ${item.label}
+`);
+      }
+      if (setup.nextStep) {
+        process.stdout.write(`
+K\xF6vetkez\u0151 l\xE9p\xE9s:
+  ${setup.nextStep}
+`);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  booking.command("export").description("Teljes konfigur\xE1ci\xF3 JSON-ban (haszno booking apply bemenetk\xE9nt haszn\xE1lhat\xF3)").action(async (_opts, _cmd) => {
+    try {
+      const setup = await client2.booking.getSetup();
+      const exportPayload = {
+        theme: setup.page.theme,
+        services: setup.services,
+        resources: setup.resources,
+        hours: setup.hours,
+        exceptions: setup.exceptions
+      };
+      printJson3(exportPayload);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  booking.command("apply <forr\xE1s>").description("Konfigur\xE1ci\xF3 alkalmaz\xE1sa JSON f\xE1jlb\xF3l vagy stdin-r\u0151l (alap\xE9rt. dry-run)").option("--dry-run", "Csak a v\xE1ltoz\xE1sokat list\xE1zza, nem ment (alap\xE9rtelmezett --yes n\xE9lk\xFCl)").option("--yes", "T\xE9nyleges alkalmaz\xE1s (dry-run kihagy\xE1sa)").action(async (source, opts, cmd) => {
+    try {
+      const rawText = await readStdinOrFile(source);
+      const body = parseJson(rawText, source);
+      const dryRun = !!opts.dryRun || !opts.yes;
+      const result = await client2.booking.applySetup(body, dryRun);
+      if (getJsonFlag3(cmd)) {
+        printJson3(result);
+        return;
+      }
+      if (dryRun) {
+        process.stdout.write("Dry-run \u2014 v\xE1ltoz\xE1sok (nem lett mentve):\n");
+      } else {
+        process.stdout.write("Alkalmazva. V\xE1ltoz\xE1sok:\n");
+      }
+      if (result.changes.length === 0) {
+        process.stdout.write("  (nincs v\xE1ltoz\xE1s)\n");
+      } else {
+        for (const ch of result.changes) {
+          process.stdout.write(`  \u2022 ${ch}
+`);
+        }
+      }
+      if (dryRun) {
+        process.stdout.write("\nAz alkalmaz\xE1shoz add meg a --yes kapcsol\xF3t.\n");
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const theme = booking.command("theme").description("Megjelen\xE9s (t\xE9ma) be\xE1ll\xEDt\xE1sai");
+  theme.command("set").description("T\xE9ma r\xE9szleges friss\xEDt\xE9se (csak a megadott mez\u0151k v\xE1ltoznak)").option("--accent <#hex>", "Kiemel\xE9si sz\xEDn (pl. #12b5a0)").option("--background <\xE9rt\xE9ke>", "H\xE1tt\xE9r: light | soft | dark").option("--radius <\xE9rt\xE9ke>", "Saroksug\xE1r: sharp | soft | round").option("--font <\xE9rt\xE9ke>", "Bet\u0171t\xEDpus: inter | serif | rounded").option("--logo <url>", "Log\xF3 URL (https://\u2026)").option("--cover <url>", "Bor\xEDt\xF3k\xE9p URL (https://\u2026)").option("--headline <sz\xF6veg>", "F\u0151c\xEDm (max. 80 karakter)").option("--button <sz\xF6veg>", "Gombfelirat (max. 40 karakter)").action(
+    async (opts, cmd) => {
+      const partial = {};
+      if (opts.accent !== void 0) partial.accent = opts.accent;
+      if (opts.background !== void 0)
+        partial.background = opts.background;
+      if (opts.radius !== void 0) partial.radius = opts.radius;
+      if (opts.font !== void 0) partial.font = opts.font;
+      if (opts.logo !== void 0) partial.logoUrl = opts.logo;
+      if (opts.cover !== void 0) partial.coverUrl = opts.cover;
+      if (opts.headline !== void 0) partial.headline = opts.headline;
+      if (opts.button !== void 0) partial.buttonLabel = opts.button;
+      if (Object.keys(partial).length === 0) {
+        process.stderr.write("Legal\xE1bb egy opci\xF3t adj meg (pl. --accent, --background).\n");
+        process.exitCode = 2;
+        return;
+      }
+      try {
+        const result = await client2.booking.setTheme(partial);
+        if (getJsonFlag3(cmd)) {
+          printJson3(result);
+          return;
+        }
+        process.stdout.write("T\xE9ma friss\xEDtve.\n");
+        if (result.accent) process.stdout.write(`  Kiemel\xE9si sz\xEDn:  ${result.accent}
+`);
+        if (result.background) process.stdout.write(`  H\xE1tt\xE9r:          ${result.background}
+`);
+        if (result.radius) process.stdout.write(`  Saroksug\xE1r:      ${result.radius}
+`);
+        if (result.font) process.stdout.write(`  Bet\u0171t\xEDpus:       ${result.font}
+`);
+        if (result.logoUrl) process.stdout.write(`  Log\xF3 URL:        ${result.logoUrl}
+`);
+        if (result.coverUrl) process.stdout.write(`  Bor\xEDt\xF3k\xE9p URL:   ${result.coverUrl}
+`);
+        if (result.headline) process.stdout.write(`  F\u0151c\xEDm:           ${result.headline}
+`);
+        if (result.buttonLabel) process.stdout.write(`  Gombfelirat:     ${result.buttonLabel}
+`);
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  const service = booking.command("service").description("Foglalhat\xF3 szolg\xE1ltat\xE1sok kezel\xE9se");
+  service.command("list").description("Szolg\xE1ltat\xE1sok list\xE1ja").action(async (_opts, cmd) => {
+    try {
+      const services = await client2.booking.listServices();
+      if (getJsonFlag3(cmd)) {
+        printJson3(services);
+        return;
+      }
+      if (services.length === 0) {
+        process.stdout.write("Nincs szolg\xE1ltat\xE1s.\n");
+        return;
+      }
+      for (const s of services) process.stdout.write(fmtService(s) + "\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  service.command("add").description("\xDAj szolg\xE1ltat\xE1s hozz\xE1ad\xE1sa").requiredOption("--name <n\xE9v>", "Szolg\xE1ltat\xE1s neve").requiredOption("--duration <perc>", "Id\u0151tartam percben").option("--price <Ft>", "\xC1r (brutt\xF3 Ft, \xFCresen = \xE1r n\xE9lk\xFCl)").option("--description <sz\xF6veg>", "Le\xEDr\xE1s").action(
+    async (opts, cmd) => {
+      const durationMin = parseInt(opts.duration, 10);
+      if (isNaN(durationMin) || durationMin <= 0) {
+        process.stderr.write("--duration \xE9rt\xE9ke pozit\xEDv eg\xE9sz sz\xE1m kell legyen.\n");
+        process.exitCode = 2;
+        return;
+      }
+      try {
+        const body = {
+          name: opts.name,
+          durationMin,
+          priceGross: opts.price != null ? parseInt(opts.price, 10) : null,
+          description: opts.description ?? null
+        };
+        const result = await client2.booking.createService(body);
+        if (getJsonFlag3(cmd)) {
+          printJson3(result);
+          return;
+        }
+        process.stdout.write(`Szolg\xE1ltat\xE1s hozz\xE1adva:
+${fmtService(result)}
+`);
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  service.command("update <id>").description("Megl\xE9v\u0151 szolg\xE1ltat\xE1s m\xF3dos\xEDt\xE1sa").option("--name <n\xE9v>", "\xDAj neve").option("--duration <perc>", "\xDAj id\u0151tartam percben").option("--price <Ft>", "\xDAj \xE1r (brutt\xF3 Ft)").option("--description <sz\xF6veg>", "Le\xEDr\xE1s").option("--active", "Aktiv\xE1l\xE1s").option("--no-active", "Deaktiv\xE1l\xE1s").action(
+    async (idStr, opts, cmd) => {
+      const id = parseInt(idStr, 10);
+      if (isNaN(id)) {
+        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        process.exitCode = 2;
+        return;
+      }
+      const body = {};
+      if (opts.name !== void 0) body.name = opts.name;
+      if (opts.duration !== void 0) {
+        const dur = parseInt(opts.duration, 10);
+        if (isNaN(dur) || dur <= 0) {
+          process.stderr.write("--duration \xE9rt\xE9ke pozit\xEDv eg\xE9sz sz\xE1m kell legyen.\n");
+          process.exitCode = 2;
+          return;
+        }
+        body.durationMin = dur;
+      }
+      if (opts.price !== void 0) body.priceGross = parseInt(opts.price, 10);
+      if (opts.description !== void 0) body.description = opts.description;
+      if (opts.active !== void 0) body.active = opts.active;
+      if (Object.keys(body).length === 0) {
+        process.stderr.write("Legal\xE1bb egy m\xF3dos\xEDtand\xF3 mez\u0151t adj meg.\n");
+        process.exitCode = 2;
+        return;
+      }
+      try {
+        const result = await client2.booking.updateService(id, body);
+        if (getJsonFlag3(cmd)) {
+          printJson3(result);
+          return;
+        }
+        process.stdout.write(`Szolg\xE1ltat\xE1s #${id} friss\xEDtve:
+${fmtService(result)}
+`);
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  service.command("remove <id>").description("Szolg\xE1ltat\xE1s t\xF6rl\xE9se (soft-delete)").action(async (idStr, _opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const result = await client2.booking.deleteService(id);
+      if (getJsonFlag3(cmd)) {
+        printJson3(result);
+        return;
+      }
+      process.stdout.write(`Szolg\xE1ltat\xE1s #${id} t\xF6r\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const resource = booking.command("resource").description("Er\u0151forr\xE1sok kezel\xE9se (szem\xE9lyek, termek, eszk\xF6z\xF6k)");
+  resource.command("list").description("Er\u0151forr\xE1sok list\xE1ja").action(async (_opts, cmd) => {
+    try {
+      const resources = await client2.booking.listResources();
+      if (getJsonFlag3(cmd)) {
+        printJson3(resources);
+        return;
+      }
+      if (resources.length === 0) {
+        process.stdout.write("Nincs er\u0151forr\xE1s.\n");
+        return;
+      }
+      for (const r of resources) process.stdout.write(fmtResource(r) + "\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  resource.command("add").description("\xDAj er\u0151forr\xE1s hozz\xE1ad\xE1sa").requiredOption("--name <n\xE9v>", "Er\u0151forr\xE1s neve").option("--description <sz\xF6veg>", "Le\xEDr\xE1s").action(
+    async (opts, cmd) => {
+      try {
+        const body = {
+          name: opts.name,
+          description: opts.description ?? null
+        };
+        const result = await client2.booking.createResource(body);
+        if (getJsonFlag3(cmd)) {
+          printJson3(result);
+          return;
+        }
+        process.stdout.write(`Er\u0151forr\xE1s hozz\xE1adva:
+${fmtResource(result)}
+`);
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  resource.command("update <id>").description("Megl\xE9v\u0151 er\u0151forr\xE1s m\xF3dos\xEDt\xE1sa").option("--name <n\xE9v>", "\xDAj neve").option("--description <sz\xF6veg>", "Le\xEDr\xE1s").option("--active", "Aktiv\xE1l\xE1s").option("--no-active", "Deaktiv\xE1l\xE1s").action(
+    async (idStr, opts, cmd) => {
+      const id = parseInt(idStr, 10);
+      if (isNaN(id)) {
+        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        process.exitCode = 2;
+        return;
+      }
+      const body = {};
+      if (opts.name !== void 0) body.name = opts.name;
+      if (opts.description !== void 0) body.description = opts.description;
+      if (opts.active !== void 0) body.active = opts.active;
+      if (Object.keys(body).length === 0) {
+        process.stderr.write("Legal\xE1bb egy m\xF3dos\xEDtand\xF3 mez\u0151t adj meg.\n");
+        process.exitCode = 2;
+        return;
+      }
+      try {
+        const result = await client2.booking.updateResource(id, body);
+        if (getJsonFlag3(cmd)) {
+          printJson3(result);
+          return;
+        }
+        process.stdout.write(`Er\u0151forr\xE1s #${id} friss\xEDtve:
+${fmtResource(result)}
+`);
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  resource.command("remove <id>").description("Er\u0151forr\xE1s t\xF6rl\xE9se (soft-delete)").action(async (idStr, _opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const result = await client2.booking.deleteResource(id);
+      if (getJsonFlag3(cmd)) {
+        printJson3(result);
+        return;
+      }
+      process.stdout.write(`Er\u0151forr\xE1s #${id} t\xF6r\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const hours = booking.command("hours").description("Nyitvatart\xE1s be\xE1ll\xEDt\xE1sa");
+  hours.command("set <forr\xE1s>").description(
+    'Nyitvatart\xE1s teljes fel\xFCl\xEDr\xE1sa JSON f\xE1jlb\xF3l vagy stdin-r\u0151l\n  Form\xE1tum: { "hours": [{ "day": "mon", "open": "09:00", "close": "17:00" }, \u2026] }\n  Z\xE1rva tart\xE1s jelz\xE9se: "open": null, "close": null'
+  ).action(async (source, _opts, cmd) => {
+    try {
+      const rawText = await readStdinOrFile(source);
+      const parsed = parseJson(
+        rawText,
+        source
+      );
+      const hoursArray = Array.isArray(parsed) ? parsed : parsed.hours ?? parsed;
+      if (!Array.isArray(hoursArray) || hoursArray.length === 0) {
+        process.stderr.write(
+          '\xC9rv\xE9nytelen form\xE1tum. Elv\xE1rt: { "hours": [...] } vagy [{ "day": ..., "open": ..., "close": ... }]\n'
+        );
+        process.exitCode = 2;
+        return;
+      }
+      const result = await client2.booking.setHours(hoursArray);
+      if (getJsonFlag3(cmd)) {
+        printJson3(result);
+        return;
+      }
+      process.stdout.write("Nyitvatart\xE1s be\xE1ll\xEDtva:\n");
+      for (const h of Array.isArray(result) ? result : hoursArray) {
+        const time = h.open && h.close ? `${h.open} \u2013 ${h.close}` : "z\xE1rva";
+        process.stdout.write(`  ${h.day.padEnd(4)}  ${time}
+`);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  const closure = booking.command("closure").description("Z\xE1r\xE1sok \xE9s kiv\xE9telek kezel\xE9se");
+  closure.command("add").description("Z\xE1r\xE1s / kiv\xE9tel nap hozz\xE1ad\xE1sa").requiredOption("--date <\xC9\xC9\xC9\xC9-HH-NN>", "D\xE1tum (ISO-8601)").option("--label <sz\xF6veg>", 'Felirat (pl. \u201E\xC1llami \xFCnnep")').option("--open <\xD3\xD3:PP>", "K\xFCl\xF6nleges nyitvatart\xE1s kezdete (\xFCresen = z\xE1rva)").option("--close <\xD3\xD3:PP>", "K\xFCl\xF6nleges nyitvatart\xE1s v\xE9ge").action(
+    async (opts, cmd) => {
+      try {
+        const result = await client2.booking.addClosure({
+          date: opts.date,
+          label: opts.label ?? null,
+          open: opts.open ?? null,
+          close: opts.close ?? null
+        });
+        if (getJsonFlag3(cmd)) {
+          printJson3(result);
+          return;
+        }
+        const time = result.open && result.close ? `${result.open} \u2013 ${result.close}` : "z\xE1rva";
+        process.stdout.write(
+          `Z\xE1r\xE1s/kiv\xE9tel hozz\xE1adva: #${result.id}  ${result.date}  ${time}${result.label ? `  (${result.label})` : ""}
+`
+        );
+      } catch (err) {
+        handleError2(err);
+      }
+    }
+  );
+  closure.command("remove <id>").description("Z\xE1r\xE1s / kiv\xE9tel t\xF6rl\xE9se").action(async (idStr, _opts, cmd) => {
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const result = await client2.booking.removeClosure(id);
+      if (getJsonFlag3(cmd)) {
+        printJson3(result);
+        return;
+      }
+      process.stdout.write(`Z\xE1r\xE1s/kiv\xE9tel #${id} t\xF6r\xF6lve.
+`);
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  booking.command("publish").description("Foglal\xE1si oldal k\xF6zz\xE9t\xE9tele (--yes k\xF6telez\u0151)").option("--yes", "Meger\u0151s\xEDt\xE9s").action(async (opts, cmd) => {
+    if (!opts.yes) {
+      process.stderr.write(
+        "A k\xF6zz\xE9t\xE9telhez add meg a --yes kapcsol\xF3t: haszno booking publish --yes\n"
+      );
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const result = await client2.booking.publish(true);
+      if (getJsonFlag3(cmd)) {
+        printJson3(result);
+        return;
+      }
+      process.stdout.write(
+        result.published ? "Foglal\xE1si oldal k\xF6zz\xE9t\xE9ve.\n" : "A k\xF6zz\xE9t\xE9tel sikertelen (ellen\u0151rizd az ellen\u0151rz\u0151list\xE1t: haszno booking status).\n"
+      );
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  booking.command("unpublish").description("Foglal\xE1si oldal visszavon\xE1sa (--yes k\xF6telez\u0151)").option("--yes", "Meger\u0151s\xEDt\xE9s").action(async (opts, cmd) => {
+    if (!opts.yes) {
+      process.stderr.write(
+        "A visszavon\xE1shoz add meg a --yes kapcsol\xF3t: haszno booking unpublish --yes\n"
+      );
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const result = await client2.booking.publish(false);
+      if (getJsonFlag3(cmd)) {
+        printJson3(result);
+        return;
+      }
+      process.stdout.write(result.published ? "M\xE9g mindig k\xF6zz\xE9t\xE9ve.\n" : "Foglal\xE1si oldal visszavonva.\n");
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+  booking.command("appointments").description("Id\u0151pontok list\xE1ja (--from \xE9s --to k\xF6telez\u0151)").requiredOption("--from <\xC9\xC9\xC9\xC9-HH-NN>", "Kezd\u0151 d\xE1tum (ISO-8601)").requiredOption("--to <\xC9\xC9\xC9\xC9-HH-NN>", "Z\xE1r\xF3 d\xE1tum (ISO-8601)").action(async (opts, cmd) => {
+    try {
+      const appointments = await client2.booking.listAppointments({ from: opts.from, to: opts.to });
+      if (getJsonFlag3(cmd)) {
+        printJson3(appointments);
+        return;
+      }
+      if (appointments.length === 0) {
+        process.stdout.write("Nincs id\u0151pont a megadott id\u0151szakban.\n");
+        return;
+      }
+      process.stdout.write(
+        `Id\u0151pontok (${opts.from} \u2013 ${opts.to}): ${appointments.length} db
+
+`
+      );
+      for (const a of appointments) {
+        process.stdout.write(fmtAppointment(a) + "\n");
+        if (a.customerPhone) process.stdout.write(`         Tel: ${a.customerPhone}
+`);
+        if (a.notes) process.stdout.write(`         Megjegyz\xE9s: ${a.notes}
+`);
+      }
+    } catch (err) {
+      handleError2(err);
+    }
+  });
+}
+
 // src/index.ts
-var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.5.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
+var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.6.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
 function buildClient(opts) {
   return createClient({
     baseUrl: opts.apiUrl,
@@ -5170,6 +5701,7 @@ registerResearchCommands(program, client);
 registerActionsCommands(program, client);
 registerShopCommands(program, shopClient);
 registerModulesCommands(program, client);
+registerBookingCommands(program, client);
 program.hook("preAction", (thisCommand) => {
   const parts = [];
   let cmd = thisCommand;
