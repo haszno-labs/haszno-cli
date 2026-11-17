@@ -33,12 +33,13 @@ import { registerReportCommands } from './commands/report.js'
 import { registerResearchCommands } from './commands/research.js'
 import { registerActionsCommands } from './commands/actions.js'
 import { registerShopCommands } from './commands/shop.js'
+import { registerModulesCommands } from './commands/modules.js'
 import { createShopClient } from './client/shop.js'
 
 const program = new Command()
   .name('haszno')
   .description('Haszno dropshipping CLI')
-  .version('0.4.0')
+  .version('0.5.0')
   .option('--json', 'output machine-readable JSON')
   .option('--api-url <url>', 'Haszno API base URL (overrides HASZNO_API_URL)')
   .option('--api-key <key>', 'Haszno API key (overrides HASZNO_API_KEY)')
@@ -80,5 +81,6 @@ registerReportCommands(program, client)
 registerResearchCommands(program, client)
 registerActionsCommands(program, client)
 registerShopCommands(program, shopClient)
+registerModulesCommands(program, client)
 
 program.parse()

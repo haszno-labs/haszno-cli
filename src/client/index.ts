@@ -67,6 +67,9 @@ import type {
   AgentAction,
   ActionInput,
   ActionStatus,
+  ModulePriceList,
+  ShopModuleList,
+  ModuleActivateResult,
 } from './types.js'
 
 export type { HttpOptions }
@@ -283,6 +286,14 @@ export interface HasznoClient {
     listActions(params?: { status?: ActionStatus; limit?: number }): Promise<AgentAction[]>
     proposeAction(body: ActionInput & { reason: string; reportItemId?: number }): Promise<AgentAction>
   }
+
+  modules: {
+    listPrices(): Promise<ModulePriceList>
+    listMy(): Promise<ShopModuleList>
+    activate(moduleId: string): Promise<ModuleActivateResult>
+    cancel(moduleId: string): Promise<{ moduleId: string; status: string }>
+    resume(moduleId: string): Promise<{ moduleId: string; status: string }>
+  }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -444,6 +455,14 @@ function createShopTokenClient(opts: HttpOptions): HasznoClient {
         return get(`/api/agent/actions${suffix}`, o)
       },
       proposeAction: (body: ActionInput & { reason: string; reportItemId?: number }) => post('/api/agent/actions', body, o),
+    },
+
+    modules: {
+      listPrices: () => get('/api/shop/modules/prices', o),
+      listMy: () => get('/api/shop/modules/my', o),
+      activate: (moduleId: string) => post(`/api/shop/modules/${moduleId}/activate`, null, o),
+      cancel: (moduleId: string) => post(`/api/shop/modules/${moduleId}/cancel`, null, o),
+      resume: (moduleId: string) => post(`/api/shop/modules/${moduleId}/resume`, null, o),
     },
   }
 }
@@ -627,6 +646,14 @@ function createLegacyClient(opts: HttpOptions): HasznoClient {
       postFindings: notSupportedLegacy('manager.postFindings'),
       listActions: notSupportedLegacy('manager.listActions'),
       proposeAction: notSupportedLegacy('manager.proposeAction'),
+    },
+
+    modules: {
+      listPrices: () => get('/api/shop/modules/prices', o),
+      listMy: () => get('/api/shop/modules/my', o),
+      activate: (moduleId: string) => post(`/api/shop/modules/${moduleId}/activate`, null, o),
+      cancel: (moduleId: string) => post(`/api/shop/modules/${moduleId}/cancel`, null, o),
+      resume: (moduleId: string) => post(`/api/shop/modules/${moduleId}/resume`, null, o),
     },
   }
 }
