@@ -249,6 +249,37 @@ A fájl `chmod 600` jogosultsággal íródik — csak a te felhasználód olvash
 
 ---
 
+## Vászon — a saját Claude Code-od a chatpanelen
+
+A Vászon oldal (haszno.com/app/vaszon) chatpanelje a gépeden futó Claude Code-ot is tudja
+vezérelni, a **saját Claude-bejelentkezéseddel** — API-kulcs nélkül. Ehhez a CLI egy helyi hidat
+indít, amely az [ACP-adapteren](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
+keresztül beszél a Claude Code-dal, és odaadja neki a Haszno MCP-szerverét.
+
+```bash
+npm install -g @agentclientprotocol/claude-agent-acp   # egyszer: az adapter
+haszno login                                            # egyszer: bolt-token
+haszno vaszon --open                                    # híd indítása + párosító link megnyitása
+```
+
+A panel állapotai: **indul**, **kész**, **bejelentkezés kell** (`claude-agent-acp --cli auth login --claudeai`),
+**nincs telepítve** (a telepítőparanccsal).
+
+Biztonság:
+
+- A híd csak a `127.0.0.1`-en figyel; minden kéréshez kell a párosító token (a linkben), és csak a
+  Haszno weboldaláról fogad kérést.
+- A Claude Code munkamenete **beépített eszközök nélkül** indul (nincs shell, nincs fájlhozzáférés),
+  a saját Claude Code-beállításaid és MCP-szervereid nélkül: csak a Haszno eszközeit éri el.
+- A módosító hívásokhoz a panel jóváhagyást kér; az olvasó hívások maguktól futnak.
+- Kulcsot nem kezel: a Claude Code a saját bejelentkezésével fut, a bolt-token a gépeden marad.
+
+| Kapcsoló | Leírás |
+|---|---|
+| `--port <port>` | helyi port (alapértelmezés: 47600) |
+| `--open` | a párosító link megnyitása a böngészőben |
+| `--allow-origin <origin...>` | további engedélyezett webes eredet (fejlesztéshez) |
+
 ## Kapcsolódó repók
 
 Ez a három repó együtt alkotja a Haszno agent SDK-t:
