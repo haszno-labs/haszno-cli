@@ -14,6 +14,7 @@
  */
 import { HasznoApiError } from './error.js'
 import { type Connection, type HasznoConfig, resolveConnection } from './config.js'
+import { currentToolName } from './tool-context.js'
 
 /** Prefix that server-issued shop API tokens always carry. */
 export const SHOP_TOKEN_PREFIX = 'haszno_'
@@ -39,8 +40,8 @@ export interface HttpOptions {
   readConfig?: () => HasznoConfig
 }
 
-/** CLI version for User-Agent */
-const CLI_VERSION = '0.3.0'
+/** CLI version for User-Agent — keep in sync with package.json */
+const CLI_VERSION = '0.5.0'
 
 function buildAuthHeader(conn: Connection): Record<string, string> {
   // Never print credentials.
@@ -75,11 +76,13 @@ export async function request<T>(
   const retryDelayMs = opts.retryDelayMs ?? 500
   const timeoutMs = opts.timeoutMs ?? 30_000
 
+  const toolName = currentToolName()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
     'User-Agent': `haszno-cli/${CLI_VERSION}`,
     ...buildAuthHeader(conn),
+    ...(toolName ? { 'X-Haszno-Tool': toolName } : {}),
   }
 
   let lastError: unknown

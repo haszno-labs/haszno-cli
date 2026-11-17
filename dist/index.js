@@ -6,8 +6,9 @@ import {
   isShopToken,
   patch,
   post,
-  put
-} from "./chunk-VM33OE5G.js";
+  put,
+  setCurrentCommandPath
+} from "./chunk-35LUSKOJ.js";
 import {
   CONFIG_PATH,
   readConfigFile,
@@ -2266,7 +2267,7 @@ Token elmentve: ${configPath}
       const apiUrl = existing["apiUrl"] ?? "https://haszno.com";
       try {
         const revokeOpts = { ...httpOpts, baseUrl: apiUrl, apiKey };
-        const { post: httpPost } = await import("./http-GIS2D4PG.js");
+        const { post: httpPost } = await import("./http-NCHO5KLD.js");
         await httpPost("/api/v1/auth/tokens/revoke-current", {}, revokeOpts);
         process.stdout.write("Token visszavonva a szerveren.\n");
       } catch {
@@ -2354,12 +2355,12 @@ Token elmentve: ${configPath}
   });
   account.command("whoami").description("Azonos\xEDt\xE1s \xF6sszefoglal\xF3ja \u2014 bolt-tokennel /api/v1/auth/me-t h\xEDv, egy\xE9b hiteles\xEDt\xE9sn\xE9l az API be\xE1ll\xEDt\xE1sait k\xE9ri le").action(async (_opts, cmd) => {
     const { resolveConnection: resolveConnection2 } = await import("./config-QM7YIT3B.js");
-    const { isShopToken: isShopToken2 } = await import("./http-GIS2D4PG.js");
+    const { isShopToken: isShopToken2 } = await import("./http-NCHO5KLD.js");
     const conn = resolveConnection2(httpOpts, process.env);
     const isShop = isShopToken2(conn.apiKey);
     try {
       if (isShop) {
-        const { get: httpGet } = await import("./http-GIS2D4PG.js");
+        const { get: httpGet } = await import("./http-NCHO5KLD.js");
         const me = await httpGet("/api/v1/auth/me", httpOpts);
         if (getJsonFlag(cmd)) {
           printJson3(me);
@@ -2545,7 +2546,7 @@ Token elmentve: ${configPath}
   });
   account.command("me").description("Azonos\xEDt\xE1si adatok lek\xE9r\xE9se a szerverr\u0151l (GET /api/v1/auth/me) \u2014 bolt-token \xE9s egy\xE9b hiteles\xEDt\xE9si m\xF3dokkal egyar\xE1nt m\u0171k\xF6dik").action(async (_opts, cmd) => {
     try {
-      const { get: httpGet } = await import("./http-GIS2D4PG.js");
+      const { get: httpGet } = await import("./http-NCHO5KLD.js");
       const me = await httpGet("/api/v1/auth/me", httpOpts);
       if (getJsonFlag(cmd)) {
         printJson3(me);
@@ -2567,7 +2568,7 @@ Token elmentve: ${configPath}
   });
   account.command("doctor").description("Hiteles\xEDt\xE9si m\xF3d, token hat\xF3k\xF6r \xE9s el\xE9rhet\u0151 parancsok ellen\u0151rz\xE9se").action(async (_opts, cmd) => {
     const { resolveConnection: resolveConnection2 } = await import("./config-QM7YIT3B.js");
-    const { isShopToken: isShopToken2 } = await import("./http-GIS2D4PG.js");
+    const { isShopToken: isShopToken2 } = await import("./http-NCHO5KLD.js");
     const conn = resolveConnection2(httpOpts, process.env);
     const isShop = isShopToken2(conn.apiKey);
     const credentialMode = isShop ? "shop-token (Bearer)" : conn.apiKey ? "api-key (x-api-key)" : conn.basicAuth ? "Basic" : "nincs hiteles\xEDt\xE9s";
@@ -2575,7 +2576,7 @@ Token elmentve: ${configPath}
     let me = {};
     let apiError;
     try {
-      const { get: httpGet } = await import("./http-GIS2D4PG.js");
+      const { get: httpGet } = await import("./http-NCHO5KLD.js");
       me = await httpGet("/api/v1/auth/me", httpOpts);
       apiOk = true;
     } catch (err) {
@@ -2642,7 +2643,7 @@ Token elmentve: ${configPath}
   const tokens = program2.command("tokens").description("API tokenek kezel\xE9se");
   tokens.command("list").description("Akt\xEDv API tokenek list\xE1ja (session-alap\xFA hiteles\xEDt\xE9s sz\xFCks\xE9ges)").action(async (_opts, cmd) => {
     try {
-      const { get: httpGet } = await import("./http-GIS2D4PG.js");
+      const { get: httpGet } = await import("./http-NCHO5KLD.js");
       const items = await httpGet("/api/v1/auth/tokens", httpOpts);
       if (getJsonFlag(cmd)) {
         printJson3(items);
@@ -2671,7 +2672,7 @@ Token elmentve: ${configPath}
       return;
     }
     try {
-      const { del: httpDel } = await import("./http-GIS2D4PG.js");
+      const { del: httpDel } = await import("./http-NCHO5KLD.js");
       const result = await httpDel(`/api/v1/auth/tokens/${id}`, httpOpts);
       if (getJsonFlag(cmd)) printJson3(result);
       else process.stdout.write(`Token #${id} visszavonva.
@@ -5701,5 +5702,14 @@ registerActionsCommands(program, client);
 registerShopCommands(program, shopClient);
 registerModulesCommands(program, client);
 registerBookingCommands(program, client);
+program.hook("preAction", (thisCommand) => {
+  const parts = [];
+  let cmd = thisCommand;
+  while (cmd !== null && cmd !== program) {
+    parts.unshift(cmd.name());
+    cmd = cmd.parent ?? null;
+  }
+  setCurrentCommandPath(`cli ${parts.join(" ")}`.trimEnd());
+});
 program.parse();
 //# sourceMappingURL=index.js.map

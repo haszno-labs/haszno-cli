@@ -17,6 +17,7 @@
  */
 import { Command } from 'commander'
 import { createClient } from './client/index.js'
+import { setCurrentCommandPath } from './client/tool-context.js'
 
 import { registerCatalogCommands } from './commands/catalog.js'
 import { registerProductsCommands } from './commands/products.js'
@@ -84,5 +85,17 @@ registerActionsCommands(program, client)
 registerShopCommands(program, shopClient)
 registerModulesCommands(program, client)
 registerBookingCommands(program, client)
+
+// Record the invoked command path as "cli <subcommand path>" before each action.
+// This value is picked up by http.ts to populate the X-Haszno-Tool request header.
+program.hook('preAction', (thisCommand) => {
+  const parts: string[] = []
+  let cmd: Command | null = thisCommand
+  while (cmd !== null && cmd !== program) {
+    parts.unshift(cmd.name())
+    cmd = cmd.parent ?? null
+  }
+  setCurrentCommandPath(`cli ${parts.join(' ')}`.trimEnd())
+})
 
 program.parse()
