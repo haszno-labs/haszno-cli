@@ -6073,9 +6073,9 @@ import { createServer } from "http";
 import { randomBytes, timingSafeEqual } from "crypto";
 var MAX_BODY_BYTES = 64 * 1024;
 var HEARTBEAT_MS = 15e3;
-function tokenMatches(given, expected) {
-  if (!given) return false;
-  const a = Buffer.from(given);
+function tokenMatches(given2, expected) {
+  if (!given2) return false;
+  const a = Buffer.from(given2);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
@@ -6363,8 +6363,160 @@ Le\xE1ll\xEDt\xE1s: Ctrl+C
   });
 }
 
+// src/commands/webshop.ts
+import { readFileSync as readFileSync6 } from "fs";
+
+// src/client/mcp.ts
+var McpToolError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "McpToolError";
+  }
+};
+function parseRpcBody(text) {
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
+  const data = text.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).pop();
+  if (!data) throw new Error("A Haszno MCP szerver \xFCres v\xE1laszt adott.");
+  return JSON.parse(data);
+}
+async function callMcpTool(name, args, opts = {}) {
+  const conn = resolveConnection(opts, process.env, opts.readConfig);
+  if (!isShopToken(conn.apiKey)) {
+    throw new Error("Ehhez bolt-kulcs (haszno_\u2026) kell: `haszno configure --api-key <kulcs>` vagy HASZNO_API_TOKEN.");
+  }
+  const fetchFn = opts.fetch ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 6e4);
+  let response;
+  try {
+    response = await fetchFn(`${conn.baseUrl}/api/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${conn.apiKey}`
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`A kulcsot a szerver elutas\xEDtotta (HTTP ${response.status}). Ellen\u0151rizd: haszno whoami`);
+  }
+  if (!response.ok) throw new Error(`A Haszno MCP szerver hib\xE1t adott (HTTP ${response.status}).`);
+  const answer = parseRpcBody(await response.text());
+  if (answer.error) throw new McpToolError(answer.error.message ?? "Ismeretlen hiba");
+  const text = (answer.result?.content ?? []).map((part) => part.text ?? "").join("\n");
+  if (answer.result?.isError) throw new McpToolError(text || "Ismeretlen hiba");
+  return text;
+}
+
+// src/commands/webshop.ts
+function isJsonMode11(cmd) {
+  let p = cmd;
+  while (p) {
+    if (p.opts().json) return true;
+    p = p.parent;
+  }
+  return false;
+}
+function readJsonArg(value, label) {
+  const raw = value === "-" ? readFileSync6(0, "utf8") : value.startsWith("@") ? readFileSync6(value.slice(1), "utf8") : value;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`A(z) ${label} nem \xE9rv\xE9nyes JSON.`);
+  }
+}
+function wholeNumber(value, label) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`A(z) ${label} nemnegat\xEDv eg\xE9sz sz\xE1m legyen.`);
+  return n;
+}
+var given = (args) => Object.fromEntries(Object.entries(args).filter(([, v]) => v !== void 0));
+function print(text, json) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    process.stdout.write(json ? JSON.stringify({ text }) + "\n" : text + "\n");
+    return;
+  }
+  process.stdout.write(JSON.stringify(parsed, null, json ? 0 : 2) + "\n");
+}
+function registerWebshopCommands(program2, opts, call) {
+  const callTool = call ?? ((name, args) => callMcpTool(name, args, opts));
+  const run = async (cmd, name, build) => {
+    try {
+      print(await callTool(name, given(build())), isJsonMode11(cmd));
+    } catch (err) {
+      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  };
+  const webshop = program2.command("webshop").description("A hosztolt webshop oldalszerkeszt\u0151je: oldalak, widgetek, m\xE1rka, k\xF6zz\xE9t\xE9tel");
+  const slugOpt = ["--slug <slug>", "melyik webshop (ha a fi\xF3kban t\xF6bb van)"];
+  const baseOpt = ["--base-version <n>", "a legut\xF3bb beolvasott draftVersion \u2014 \xFCtk\xF6z\xE9s ellen, mindig add meg"];
+  webshop.command("list").description("A fi\xF3k webshopjai").action((_o, cmd) => run(cmd, "haszno_webshop_list", () => ({})));
+  webshop.command("pages").description("A v\xE1zlat oldalai \xE9s a draftVersion").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_list_pages", () => ({ slug: o.slug })));
+  webshop.command("inspect [page]").description("A teljes v\xE1zlat, vagy egy oldal a widgetjeivel (home vagy az oldal slugja)").option(...slugOpt).option("--verbose", "minden be\xE1ll\xEDt\xE1s, r\xF6vid\xEDt\xE9s n\xE9lk\xFCl").action((page, o, cmd) => page === void 0 ? run(cmd, "haszno_webshop_inspect", () => ({ slug: o.slug, verbose: o.verbose })) : run(cmd, "haszno_webshop_inspect_page", () => ({ slug: o.slug, page })));
+  webshop.command("widgets").description("A haszn\xE1lhat\xF3 widgetek").option("--category <category>", "csak egy kateg\xF3ria").action((o, cmd) => run(cmd, "haszno_webshop_list_widgets", () => ({ category: o.category })));
+  webshop.command("widget <type>").description("Egy widget be\xE1ll\xEDt\xE1sai \xE9s p\xE9ld\xE1ja").action((type, _o, cmd) => run(cmd, "haszno_webshop_describe_widget", () => ({ type })));
+  webshop.command("batch").description("Oldalm\u0171veletek egy ment\xE9sben (create_page, add_widget, update_widget, \u2026)").requiredOption("--ops <json>", "a m\u0171veletek t\xF6mbje: JSON, @f\xE1jl vagy - (szabv\xE1nyos bemenet)").option(...baseOpt).option("--expect <json>", 'elv\xE1rt eredm\xE9ny (pl. {"pages":{"home":{"widgets":5}}}) \u2014 JSON, @f\xE1jl').option("--dry-run", "csak ellen\u0151rz\xE9s, ment\xE9s n\xE9lk\xFCl").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_page_batch", () => {
+    const ops = readJsonArg(o.ops, "--ops");
+    if (!Array.isArray(ops)) throw new Error("A(z) --ops m\u0171veletek t\xF6mbje legyen.");
+    return {
+      slug: o.slug,
+      ops,
+      baseVersion: o.baseVersion === void 0 ? void 0 : wholeNumber(o.baseVersion, "--base-version"),
+      expect: o.expect === void 0 ? void 0 : readJsonArg(o.expect, "--expect"),
+      dryRun: o.dryRun
+    };
+  }));
+  webshop.command("brand").description("M\xE1rka: sz\xEDnek, bet\u0171t\xEDpusok, log\xF3, diz\xE1jn").option("--primary <color>", "els\u0151dleges sz\xEDn (#rrggbb)").option("--secondary <color>", "m\xE1sodlagos sz\xEDn (#rrggbb)").option("--font <family>", "sz\xF6vegbet\u0171").option("--display-font <family>", "c\xEDmbet\u0171").option("--logo <url>", "log\xF3 URL").option("--design <name>", "diz\xE1jn neve").option(...baseOpt).option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_set_brand", () => ({
+    slug: o.slug,
+    primaryColor: o.primary,
+    secondaryColor: o.secondary,
+    fontFamily: o.font,
+    displayFontFamily: o.displayFont,
+    logoUrl: o.logo,
+    design: o.design,
+    baseVersion: o.baseVersion === void 0 ? void 0 : wholeNumber(o.baseVersion, "--base-version")
+  })));
+  webshop.command("validate").description("A v\xE1zlat ellen\u0151rz\xE9se (hib\xE1k \xE9s figyelmeztet\xE9sek)").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_validate", () => ({ slug: o.slug })));
+  webshop.command("preview").description("El\u0151n\xE9zeti link a v\xE1zlathoz").option("--page <page>", "melyik oldal").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_preview_url", () => ({ slug: o.slug, page: o.page })));
+  webshop.command("undo").description("A v\xE1zlat visszal\xE9ptet\xE9se egy verzi\xF3val").option(...baseOpt).option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_undo", () => ({
+    slug: o.slug,
+    baseVersion: o.baseVersion === void 0 ? void 0 : wholeNumber(o.baseVersion, "--base-version")
+  })));
+  webshop.command("publish").description("A v\xE1zlat k\xF6zz\xE9t\xE9tele \u2014 a v\xE1s\xE1rl\xF3k ezt l\xE1tj\xE1k").option("--yes", "meger\u0151s\xEDt\xE9s").option(...slugOpt).action((o, cmd) => {
+    if (!o.yes) {
+      console.error("A k\xF6zz\xE9t\xE9tel \xE9les\xEDti a v\xE1zlatot. Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.");
+      process.exitCode = 1;
+      return;
+    }
+    return run(cmd, "haszno_webshop_publish", () => ({ slug: o.slug }));
+  });
+  webshop.command("guide [section]").description("Az oldal\xE9p\xEDt\u0151 \xFAtmutat\xF3 (vagy egy fejezete)").action((section, _o, cmd) => run(cmd, "haszno_site_builder_skill", () => ({ section })));
+  webshop.command("tool <name>").description("B\xE1rmelyik haszno_webshop_* eszk\xF6z h\xEDv\xE1sa nyers argumentumokkal").option("--args <json>", "az argumentumok objektuma: JSON, @f\xE1jl vagy -", "{}").action((name, o, cmd) => {
+    if (!/^haszno_(webshop_[a-z_]+|site_builder_skill)$/.test(name)) {
+      console.error("Csak haszno_webshop_* eszk\xF6z h\xEDvhat\xF3 \xEDgy.");
+      process.exitCode = 1;
+      return;
+    }
+    return run(cmd, name, () => {
+      const args = readJsonArg(o.args, "--args");
+      if (args === null || typeof args !== "object" || Array.isArray(args)) throw new Error("A(z) --args objektum legyen.");
+      return args;
+    });
+  });
+}
+
 // src/index.ts
-var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.7.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
+var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.8.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
 function buildClient(opts) {
   return createClient({
     baseUrl: opts.apiUrl,
@@ -6399,7 +6551,8 @@ registerActionsCommands(program, client);
 registerShopCommands(program, shopClient);
 registerModulesCommands(program, client);
 registerBookingCommands(program, client);
-registerVaszonCommands(program, sharedOpts, "0.7.0");
+registerVaszonCommands(program, sharedOpts, "0.8.0");
+registerWebshopCommands(program, sharedOpts);
 program.hook("preAction", (thisCommand) => {
   const parts = [];
   let cmd = thisCommand;

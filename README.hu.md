@@ -249,6 +249,35 @@ A fájl `chmod 600` jogosultsággal íródik — csak a te felhasználód olvash
 
 ---
 
+## Webshop-szerkesztő — oldalak, widgetek, márka
+
+A `haszno webshop …` a hosztolt webshop oldalszerkesztőjét vezérli terminálból vagy szkriptből. Minden parancs a
+hosztolt Haszno MCP szerver megfelelő eszközét hívja, így a CLI és az MCP-kliens ugyanúgy viselkedik. Az író
+parancsokhoz írási jogú bolt-kulcs (`haszno_…`) kell.
+
+```bash
+haszno webshop list                              # a fiók webshopjai
+haszno webshop pages                             # a vázlat oldalai + draftVersion
+haszno webshop inspect rolunk                    # egy oldal a widgetjeivel (argumentum nélkül a teljes vázlat)
+haszno webshop widgets                           # widgetkatalógus; egy widget: `haszno webshop widget hero`
+haszno webshop batch --ops @ops.json --base-version 7      # oldalműveletek egy mentésben
+haszno webshop brand --primary '#0f766e' --font Inter --base-version 8
+haszno webshop validate
+haszno webshop preview --page rolunk
+haszno webshop undo
+haszno webshop publish --yes                     # élesíti a vázlatot — csak ha a tulajdonos kérte
+haszno webshop guide                             # az oldalépítő útmutató
+haszno webshop tool haszno_webshop_get_theme     # bármelyik haszno_webshop_* eszköz nyersen (--args '<json>')
+```
+
+Több webshop esetén add meg a `--slug <slug>` kapcsolót; `--json` egysoros JSON kimenetet ad.
+
+**Több ügynök egy bolton.** Minden íráshoz add meg a `--base-version` értéket (a legutóbb olvasott `draftVersion`,
+vagy az előző írásod `version` értéke). A `batch` csak azokat az oldalakat hasonlítja össze, amelyeket a műveletei
+írnak, így a saját oldalukon dolgozó ügynökök nem ütköznek; ha elutasít, a saját oldalad változott — olvasd be
+újra, és küldd újra. A `brand` és a többi teljes dokumentumot író parancs bármilyen újabb mentésre elutasít: ezeket
+az oldalankénti munka előtt vagy után futtasd.
+
 ## Vászon — a saját Claude Code-od a chatpanelen
 
 A Vászon oldal (haszno.com/app/vaszon) chatpanelje a gépeden futó Claude Code-ot is tudja

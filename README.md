@@ -217,6 +217,7 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 | Command | Mode | Description |
 |---|---|---|
 | `haszno login` | both | Authenticate and save config |
+| `haszno webshop ...` | shop token | Hosted webshop page editor: pages, widgets, brand, validate, publish (see above) |
 | `haszno account ping` | both | Check API connection |
 | `haszno account me` | both | Fetch identity from `/api/v1/auth/me` (name, email, shopId, tokenScope) |
 | `haszno account whoami` | both | Identity + settings; shop-token mode calls `/api/v1/auth/me` automatically |
@@ -262,6 +263,35 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 | `haszno booking appointments --from --to` | shop token | List appointments in a date range |
 
 ---
+
+## Webshop editor — pages, widgets, brand
+
+`haszno webshop …` drives the hosted webshop's page editor from a terminal or a script. Every command calls the
+matching tool of the hosted Haszno MCP server, so the CLI and an MCP client behave the same. Needs a shop token
+(`haszno_…`) with write scope for the write commands.
+
+```bash
+haszno webshop list                              # the account's webshops
+haszno webshop pages                             # pages of the draft + draftVersion
+haszno webshop inspect rolunk                    # one page with its widgets (no argument: the whole draft)
+haszno webshop widgets                           # widget catalogue; `haszno webshop widget hero` for one
+haszno webshop batch --ops @ops.json --base-version 7      # apply page ops in one save
+echo '[{"op":"create_page","slug":"rolunk","title":"Rólunk"}]' | haszno webshop batch --ops - --dry-run
+haszno webshop brand --primary '#0f766e' --font Inter --base-version 8
+haszno webshop validate
+haszno webshop preview --page rolunk
+haszno webshop undo
+haszno webshop publish --yes                     # makes the draft live — only when the owner asked
+haszno webshop guide                             # the site builder guide (ops, limits, examples)
+haszno webshop tool haszno_webshop_get_theme     # any haszno_webshop_* tool, raw (--args '<json>')
+```
+
+Add `--slug <slug>` when the account has several webshops, and `--json` for one-line JSON output.
+
+**Several agents on one shop.** Pass `--base-version` (the `draftVersion` you last read, or the `version` your
+last write returned) on every write. `batch` checks only the pages its ops write, so agents that each build their
+own page do not collide; a refusal means your own page changed — inspect it again and resend. `brand` and other
+whole-document writes are refused on any newer save: run them before the page workers start, or after they finish.
 
 ## Vászon — your own Claude Code in the chat panel
 
