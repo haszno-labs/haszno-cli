@@ -7,6 +7,7 @@ import {
   patch,
   post,
   put,
+  request,
   setCurrentCommandPath
 } from "./chunk-35LUSKOJ.js";
 import {
@@ -6515,6 +6516,329 @@ function registerWebshopCommands(program2, opts, call) {
   });
 }
 
+// src/commands/api.ts
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3, existsSync as existsSync2 } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
+import readline3 from "readline";
+var CACHE_DIR = join3(homedir2(), ".config", "haszno", "cache");
+var CACHE_FILE = join3(CACHE_DIR, "openapi.json");
+var CACHE_TTL_MS = 10 * 60 * 1e3;
+function readCache() {
+  try {
+    if (!existsSync2(CACHE_FILE)) return null;
+    const raw = readFileSync7(CACHE_FILE, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+function writeCache(entry) {
+  try {
+    mkdirSync3(CACHE_DIR, { recursive: true });
+    writeFileSync3(CACHE_FILE, JSON.stringify(entry), "utf-8");
+  } catch {
+  }
+}
+async function fetchSpec(opts) {
+  const conn = resolveConnection({ baseUrl: opts.baseUrl, apiKey: opts.apiKey }, process.env, opts._readConfig);
+  const baseUrl = conn.baseUrl;
+  if (!opts.refresh) {
+    const cached = readCache();
+    if (cached && cached.baseUrl === baseUrl && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+      return cached.spec;
+    }
+  }
+  const spec = await request("GET", "/api/openapi.json", void 0, {
+    baseUrl: opts.baseUrl,
+    apiKey: opts.apiKey,
+    fetch: opts._fetch,
+    readConfig: opts._readConfig
+  });
+  writeCache({ fetchedAt: Date.now(), baseUrl, spec });
+  return spec;
+}
+var HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"];
+function extractServerPrefix(spec) {
+  const serverUrl = spec.servers?.[0]?.url;
+  if (!serverUrl) return "";
+  try {
+    const u = new URL(serverUrl);
+    return u.pathname.replace(/\/$/, "");
+  } catch {
+    return serverUrl.replace(/\/$/, "");
+  }
+}
+function deriveRisk(method, op) {
+  if (op["x-haszno-risk"]) return op["x-haszno-risk"];
+  return method.toLowerCase() === "get" ? "read" : "confirm";
+}
+function specEntries(spec) {
+  const entries = [];
+  for (const [path, item] of Object.entries(spec.paths ?? {})) {
+    for (const method of HTTP_METHODS) {
+      const op = item[method];
+      if (op) {
+        entries.push({ method: method.toUpperCase(), path, operation: op, risk: deriveRisk(method, op) });
+      }
+    }
+  }
+  return entries;
+}
+function fillPathParams(template, values) {
+  return template.replace(/\{([^}]+)\}/g, (_, name) => {
+    if (name in values) return encodeURIComponent(values[name]);
+    return `{${name}}`;
+  });
+}
+function matchPathTemplate(template, literal) {
+  const tParts = template.split("/");
+  const lParts = literal.split("/");
+  if (tParts.length !== lParts.length) return null;
+  const params = {};
+  for (let i = 0; i < tParts.length; i++) {
+    const t = tParts[i];
+    const l = lParts[i];
+    if (t.startsWith("{") && t.endsWith("}")) {
+      params[t.slice(1, -1)] = decodeURIComponent(l);
+    } else if (t !== l) {
+      return null;
+    }
+  }
+  return params;
+}
+function findEntry(entries, method, path) {
+  const upper = method.toUpperCase();
+  for (const e of entries) {
+    if (e.method === upper && e.path === path) {
+      return { entry: e, pathParams: {} };
+    }
+  }
+  for (const e of entries) {
+    if (e.method === upper) {
+      const params = matchPathTemplate(e.path, path);
+      if (params !== null) return { entry: e, pathParams: params };
+    }
+  }
+  return null;
+}
+function padEnd3(s, n) {
+  return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
+}
+function isJsonMode12(cmd) {
+  let p = cmd;
+  while (p) {
+    if (p.opts().json) return true;
+    p = p.parent;
+  }
+  return false;
+}
+async function askConfirm5(question) {
+  const rl = readline3.createInterface({ input: process.stdin, output: process.stderr });
+  return new Promise((resolve) => {
+    rl.question(`${question} [y/N] `, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === "y");
+    });
+  });
+}
+function isTTY() {
+  return Boolean(process.stdin.isTTY);
+}
+async function cmdApiLs(query, opts) {
+  const spec = await fetchSpec({ baseUrl: opts.baseUrl, apiKey: opts.apiKey, refresh: opts.refresh, _fetch: opts._fetch, _readConfig: opts._readConfig });
+  let entries = specEntries(spec);
+  if (query) {
+    const q = query.toLowerCase();
+    entries = entries.filter(
+      (e) => e.path.toLowerCase().includes(q) || (e.operation.summary ?? "").toLowerCase().includes(q) || (e.operation.operationId ?? "").toLowerCase().includes(q)
+    );
+  }
+  if (opts.tag) {
+    const t = opts.tag.toLowerCase();
+    entries = entries.filter((e) => (e.operation.tags ?? []).some((tag) => tag.toLowerCase().includes(t)));
+  }
+  if (opts.risk) {
+    const r = opts.risk.toLowerCase();
+    entries = entries.filter((e) => e.risk === r);
+  }
+  if (opts.json) {
+    console.log(JSON.stringify(entries.map((e) => ({ method: e.method, path: e.path, summary: e.operation.summary ?? "", risk: e.risk })), null, 2));
+    return;
+  }
+  if (entries.length === 0) {
+    console.log("Nincs tal\xE1lat.");
+    return;
+  }
+  console.log(padEnd3("M\xD3DSZER", 8) + " \u2502 " + padEnd3("KOCK\xC1ZAT", 9) + " \u2502 " + padEnd3("\xDAT", 45) + " \u2502 LE\xCDR\xC1S");
+  console.log("\u2500".repeat(8) + "\u2500\u253C\u2500" + "\u2500".repeat(9) + "\u2500\u253C\u2500" + "\u2500".repeat(45) + "\u2500\u253C\u2500" + "\u2500".repeat(40));
+  for (const e of entries) {
+    const summary = e.operation.summary ?? e.operation.operationId ?? "";
+    console.log(
+      padEnd3(e.method, 8) + " \u2502 " + padEnd3(e.risk, 9) + " \u2502 " + padEnd3(e.path, 45) + " \u2502 " + summary.slice(0, 60)
+    );
+  }
+}
+async function cmdApiDescribe(method, path, opts) {
+  const spec = await fetchSpec({ baseUrl: opts.baseUrl, apiKey: opts.apiKey, _fetch: opts._fetch, _readConfig: opts._readConfig });
+  const entries = specEntries(spec);
+  const match = findEntry(entries, method, path);
+  if (!match) {
+    process.stderr.write(`Ismeretlen v\xE9gpont: ${method.toUpperCase()} ${path}
+`);
+    process.exit(1);
+  }
+  const { entry } = match;
+  if (opts.json) {
+    console.log(JSON.stringify({ method: entry.method, path: entry.path, risk: entry.risk, operation: entry.operation }, null, 2));
+    return;
+  }
+  console.log(`${entry.method} ${entry.path}`);
+  console.log(`Kock\xE1zat: ${entry.risk}`);
+  if (entry.operation.summary) console.log(`Le\xEDr\xE1s: ${entry.operation.summary}`);
+  if (entry.operation.description) console.log(`
+${entry.operation.description}`);
+  const params = entry.operation.parameters ?? [];
+  if (params.length > 0) {
+    console.log("\nParam\xE9terek:");
+    for (const p of params) {
+      const req = p.required ? " (k\xF6telez\u0151)" : "";
+      const desc = p.description ?? p.schema?.description ?? "";
+      console.log(`  ${p.in.toUpperCase()} ${p.name}${req}${desc ? ": " + desc : ""}`);
+    }
+  }
+  if (entry.operation.requestBody) {
+    console.log("\nT\xF6rzs: igen" + (entry.operation.requestBody.required ? " (k\xF6telez\u0151)" : ""));
+    const content = entry.operation.requestBody.content ?? {};
+    const types = Object.keys(content);
+    if (types.length) console.log(`Content-Type: ${types.join(", ")}`);
+  }
+}
+async function cmdApiCall(method, path, opts) {
+  const isTtyFn = opts._isTTY ?? isTTY;
+  const askFn = opts._askConfirm ?? askConfirm5;
+  let entry = null;
+  let pathParams = {};
+  let risk = method.toLowerCase() === "get" ? "read" : "confirm";
+  let serverPrefix = "";
+  try {
+    const spec = await fetchSpec({ baseUrl: opts.baseUrl, apiKey: opts.apiKey, _fetch: opts._fetch, _readConfig: opts._readConfig });
+    serverPrefix = extractServerPrefix(spec);
+    const entries = specEntries(spec);
+    const match = findEntry(entries, method, path);
+    if (match) {
+      entry = match.entry;
+      pathParams = match.pathParams;
+      risk = entry.risk;
+    } else {
+      process.stderr.write(`Figyelmeztet\xE9s: a v\xE9gpont nincs a specifik\xE1ci\xF3ban \u2014 a h\xEDv\xE1s folytat\xF3dik.
+`);
+    }
+  } catch {
+    process.stderr.write(`Figyelmeztet\xE9s: nem siker\xFClt let\xF6lteni az OpenAPI specifik\xE1ci\xF3t \u2014 folytat\xE1s spec n\xE9lk\xFCl.
+`);
+  }
+  if (risk === "blocked") {
+    process.stderr.write(`Ez a v\xE9gpont le van tiltva (blocked) \u2014 a CLI megtagadja a h\xEDv\xE1st.
+`);
+    process.exit(1);
+  }
+  if (risk === "confirm") {
+    if (opts.yes) {
+    } else if (!isTtyFn()) {
+      process.stderr.write(`Ez a v\xE9gpont meger\u0151s\xEDt\xE9st ig\xE9nyel (confirm), de a bemenet nem TTY. Haszn\xE1lj --yes kapcsol\xF3t.
+`);
+      process.exit(1);
+    } else {
+      const ok = await askFn(`Meger\u0151s\xEDted a k\xF6vetkez\u0151 h\xEDv\xE1st: ${method.toUpperCase()} ${path}?`);
+      if (!ok) {
+        process.stderr.write("Megszak\xEDtva.\n");
+        process.exit(1);
+      }
+    }
+  }
+  const templatePath = entry ? entry.path : path;
+  const filledPath = fillPathParams(templatePath, pathParams);
+  const resolvedPath = serverPrefix && !filledPath.startsWith(serverPrefix) ? serverPrefix + filledPath : filledPath;
+  let queryString = "";
+  if (opts.query && opts.query.length > 0) {
+    const params = new URLSearchParams();
+    for (const kv of opts.query) {
+      const idx = kv.indexOf("=");
+      if (idx === -1) {
+        params.append(kv, "");
+      } else {
+        params.append(kv.slice(0, idx), kv.slice(idx + 1));
+      }
+    }
+    queryString = "?" + params.toString();
+  }
+  let body;
+  if (opts.data) {
+    let raw = opts.data;
+    if (raw.startsWith("@")) {
+      try {
+        raw = readFileSync7(raw.slice(1), "utf-8");
+      } catch (err) {
+        process.stderr.write(`Nem lehet olvasni a f\xE1jlt: ${raw.slice(1)}
+`);
+        process.exit(1);
+      }
+    }
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      process.stderr.write(`\xC9rv\xE9nytelen JSON: ${raw.slice(0, 80)}
+`);
+      process.exit(1);
+    }
+  }
+  let result;
+  try {
+    result = await request("GET" === method.toUpperCase() ? "GET" : method.toUpperCase(), resolvedPath + queryString, body, {
+      baseUrl: opts.baseUrl,
+      apiKey: opts.apiKey,
+      fetch: opts._fetch,
+      readConfig: opts._readConfig
+    });
+  } catch (err) {
+    const e = err;
+    if (e.statusCode === 403) {
+      process.stderr.write(`403 Tiltott hozz\xE1f\xE9r\xE9s \u2014 az API-kulcs nem rendelkezik a sz\xFCks\xE9ges jogosults\xE1gokkal.
+`);
+    } else {
+      process.stderr.write(`API hiba: ${e.message ?? String(err)}
+`);
+    }
+    process.exit(1);
+  }
+  if (opts.json || isRawJson(result)) {
+    console.log(JSON.stringify(result, null, opts.json ? 2 : 0));
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+}
+function isRawJson(_result) {
+  return false;
+}
+function registerApiCommands(program2, clientOpts) {
+  const api = program2.command("api").description("Haszno API \u2014 runtime OpenAPI-alap\xFA generikus h\xEDv\xE1sok");
+  api.command("ls [query]").description("List\xE1zza az el\xE9rhet\u0151 API v\xE9gpontokat (forr\xE1s: /api/openapi.json)").option("--tag <tag>", "sz\u0171r\xE9s tag alapj\xE1n").option("--risk <szint>", "sz\u0171r\xE9s kock\xE1zati szint alapj\xE1n: read|write|confirm|blocked").option("--refresh", "gyors\xEDt\xF3t\xE1r megker\xFCl\xE9se, friss let\xF6lt\xE9s").action(async (query, opts, cmd) => {
+    await cmdApiLs(query, { ...opts, json: isJsonMode12(cmd), ...clientOpts });
+  });
+  api.command("describe <METHOD> <path>").description("Egy v\xE9gpont param\xE9tereinek \xE9s t\xF6rzss\xE9m\xE1j\xE1nak le\xEDr\xE1sa").action(async (method, path, _opts, cmd) => {
+    await cmdApiDescribe(method, path, { json: isJsonMode12(cmd), ...clientOpts });
+  });
+  const HTTP_METHOD_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+  for (const method of HTTP_METHOD_NAMES) {
+    const lc = method.toLowerCase();
+    const methodCmd = api.command(`${lc} <path>`).alias(method).description(`HTTP ${method} k\xE9r\xE9s v\xE9grehajt\xE1sa (pl. haszno api ${lc} /health)`).option("--query <k=v>", "query param\xE9ter (ism\xE9telhet\u0151)", (val, prev) => [...prev, val], []).option("--data <json>", "k\xE9r\xE9s t\xF6rzse JSON-k\xE9nt, vagy @f\xE1jl.json").option("--yes", "meger\u0151s\xEDt\xE9s megker\xFCl\xE9se (confirm v\xE9gpontokn\xE1l)").action(async (path, opts, cmd) => {
+      await cmdApiCall(method, path, { ...opts, json: isJsonMode12(cmd), ...clientOpts });
+    });
+    void methodCmd;
+  }
+}
+
 // src/index.ts
 var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.8.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
 function buildClient(opts) {
@@ -6553,6 +6877,7 @@ registerModulesCommands(program, client);
 registerBookingCommands(program, client);
 registerVaszonCommands(program, sharedOpts, "0.8.0");
 registerWebshopCommands(program, sharedOpts);
+registerApiCommands(program, sharedOpts);
 program.hook("preAction", (thisCommand) => {
   const parts = [];
   let cmd = thisCommand;

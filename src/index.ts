@@ -39,6 +39,7 @@ import { registerModulesCommands } from './commands/modules.js'
 import { registerBookingCommands } from './commands/booking.js'
 import { registerVaszonCommands } from './commands/vaszon.js'
 import { registerWebshopCommands } from './commands/webshop.js'
+import { registerApiCommands } from './commands/api.js'
 import { createShopClient } from './client/shop.js'
 
 const program = new Command()
@@ -90,6 +91,7 @@ registerModulesCommands(program, client)
 registerBookingCommands(program, client)
 registerVaszonCommands(program, sharedOpts, '0.8.0')
 registerWebshopCommands(program, sharedOpts)
+registerApiCommands(program, sharedOpts)
 
 // Record the invoked command path as "cli <subcommand path>" before each action.
 // This value is picked up by http.ts to populate the X-Haszno-Tool request header.
