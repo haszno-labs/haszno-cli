@@ -438,6 +438,77 @@ These three repositories together form the Haszno agent SDK:
 
 ---
 
+## `haszno api` — runtime OpenAPI client
+
+Every endpoint on haszno.com is reachable from the terminal. The CLI fetches
+`/api/openapi.json` at runtime — new endpoints appear automatically without a
+CLI release.
+
+### List endpoints
+
+```bash
+# All endpoints (198+ routes, cached 10 min)
+haszno api ls
+
+# Filter by keyword
+haszno api ls products
+
+# Filter by tag
+haszno api ls --tag auth
+
+# Filter by risk level: read | write | confirm | blocked
+haszno api ls --risk read
+
+# Force refresh the cache
+haszno api ls --refresh
+
+# Machine-readable JSON
+haszno --json api ls products
+```
+
+### Describe an endpoint
+
+```bash
+haszno api describe GET /health
+haszno api describe PATCH '/products/{id}'
+```
+
+### Call an endpoint
+
+```bash
+# GET — no confirmation needed
+haszno api get /health
+haszno api get /auth/me
+haszno api get /auth/tokens
+
+# With query parameters
+haszno api get /products --query page=2 --query pageSize=10
+
+# POST / PATCH / PUT — interactive confirmation (or --yes to skip)
+haszno api post /auth/logout --yes
+
+# With a JSON body
+haszno api patch '/products/42' --data '{"manualPrice": 4990}' --yes
+haszno api patch '/products/42' --data @update.json --yes
+
+# Uppercase method aliases also work
+haszno api GET /health
+haszno api DELETE '/auth/tokens/5' --yes
+```
+
+### Risk levels
+
+| Risk | Behaviour |
+|---|---|
+| `read` | Executes immediately — no prompt. |
+| `write` | A non-GET mutation — a read-scope shop token will get 403 from the server. |
+| `confirm` | Interactive `y/N` prompt, or pass `--yes`. In non-TTY without `--yes` the CLI refuses. |
+| `blocked` | Always refused by the CLI — no HTTP call is made. |
+
+When `x-haszno-risk` is absent (older server version): GET → `read`, everything else → `confirm`.
+
+---
+
 ## Development
 
 ```bash
