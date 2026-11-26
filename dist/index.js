@@ -391,10 +391,14 @@ var jsonMode = () => false;
 var redactions = [];
 function configureCliErrors(isJson2, secrets) {
   jsonMode = isJson2;
-  redactions = secrets.filter((s) => Boolean(s)).sort((a, b) => b.length - a.length);
+  redactions = secrets.filter((s) => Boolean(s)).sort((a, b) => b.length - a.length).map((secret) => {
+    const literal = secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = secret.length < 6 ? `(?<![\\p{L}\\p{N}_])${literal}(?![\\p{L}\\p{N}_])` : literal;
+    return new RegExp(pattern, "gu");
+  });
 }
 function redact(value) {
-  for (const secret of redactions) value = value.replaceAll(secret, "[kitakarva]");
+  for (const secret of redactions) value = value.replace(secret, "[kitakarva]");
   return value.replace(/\bhaszno_(?:live|test|oa)_[A-Za-z0-9_-]+\b/g, "[kitakarva]");
 }
 function apiHint(status, code) {

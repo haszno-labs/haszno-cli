@@ -1,15 +1,20 @@
 import { HasznoApiError } from './error.js'
 
 let jsonMode = () => false
-let redactions: string[] = []
+let redactions: RegExp[] = []
 
 export function configureCliErrors(isJson: () => boolean, secrets: Array<string | undefined>): void {
   jsonMode = isJson
-  redactions = secrets.filter((s): s is string => Boolean(s)).sort((a, b) => b.length - a.length)
+  redactions = secrets.filter((s): s is string => Boolean(s)).sort((a, b) => b.length - a.length).map(secret => {
+    const literal = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // A short legacy key or password can be an ordinary substring of a diagnostic code.
+    const pattern = secret.length < 6 ? `(?<![\\p{L}\\p{N}_])${literal}(?![\\p{L}\\p{N}_])` : literal
+    return new RegExp(pattern, 'gu')
+  })
 }
 
 function redact(value: string): string {
-  for (const secret of redactions) value = value.replaceAll(secret, '[kitakarva]')
+  for (const secret of redactions) value = value.replace(secret, '[kitakarva]')
   return value.replace(/\bhaszno_(?:live|test|oa)_[A-Za-z0-9_-]+\b/g, '[kitakarva]')
 }
 

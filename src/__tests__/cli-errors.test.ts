@@ -28,3 +28,13 @@ it('preserves the requested validation exit code', () => {
   expect(exit).toHaveBeenCalledWith(2)
   expect(JSON.parse(String(stderr.mock.calls[0]?.[0]))).toEqual({ error: 'Invalid flag', code: 'invalid_input' })
 })
+
+it('redacts an echoed short password without mangling words or machine-readable codes', () => {
+  configureCliErrors(() => true, ['e', 'a:b'])
+  const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+  writeCliError(new HasznoApiError(401, 'Rejected "e" and a:b', 'unauthenticated', 'request-e2'))
+  expect(JSON.parse(String(stderr.mock.calls[0]?.[0]))).toMatchObject({
+    error: 'Rejected "[kitakarva]" and [kitakarva]',
+    code: 'unauthenticated', requestId: 'request-e2',
+  })
+})
