@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   SHOP_TOKEN_PREFIX,
+  buildAuthHeader,
   del,
   get,
   isShopToken,
@@ -8,10 +9,11 @@ import {
   post,
   put,
   request
-} from "./chunk-35LUSKOJ.js";
+} from "./chunk-U6YS466B.js";
 import "./chunk-HOIDK4EJ.js";
 export {
   SHOP_TOKEN_PREFIX,
+  buildAuthHeader,
   del,
   get,
   isShopToken,
@@ -20,4 +22,4 @@ export {
   put,
   request
 };
-//# sourceMappingURL=http-NCHO5KLD.js.map
+//# sourceMappingURL=http-QISVOT6B.js.map

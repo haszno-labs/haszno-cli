@@ -18,6 +18,8 @@
  */
 import { Command } from 'commander'
 import { createClient } from './client/index.js'
+import { resolveConnection } from './client/config.js'
+import { configureCliErrors, configureCommandErrors, writeCliError } from './client/cli-error.js'
 import { setCurrentCommandPath } from './client/tool-context.js'
 
 import { registerCatalogCommands } from './commands/catalog.js'
@@ -50,13 +52,6 @@ const program = new Command()
   .option('--api-url <url>', 'Haszno API base URL (overrides HASZNO_API_URL)')
   .option('--api-key <key>', 'Haszno API key (overrides HASZNO_API_KEY)')
 
-function buildClient(opts: { apiUrl?: string; apiKey?: string }) {
-  return createClient({
-    baseUrl: opts.apiUrl,
-    apiKey: opts.apiKey,
-  })
-}
-
 // Global flags must be known before commands are registered (they receive the client),
 // so read them straight from argv instead of program.opts() (empty until parse()).
 function argvFlag(name: string): string | undefined {
@@ -69,7 +64,11 @@ function argvFlag(name: string): string | undefined {
 }
 
 const sharedOpts = { baseUrl: argvFlag('--api-url'), apiKey: argvFlag('--api-key') }
-const client = buildClient(sharedOpts)
+const { apiKey, basicAuth } = resolveConnection(sharedOpts)
+configureCliErrors(() => program.opts().json === true, [
+  apiKey, basicAuth, basicAuth && Buffer.from(basicAuth).toString('base64'), process.env['HASZNO_PASSWORD'],
+])
+const client = createClient(sharedOpts)
 const shopClient = createShopClient(sharedOpts)
 
 registerCatalogCommands(program, client)
@@ -79,7 +78,7 @@ registerRulesCommands(program, client)
 registerOrdersCommands(program, client)
 registerIdeasCommands(program, client)
 registerFeedsCommands(program, client)
-registerAccountCommands(program, client)
+registerAccountCommands(program, client, { httpOpts: sharedOpts })
 registerCatalogueCommands(program, client)
 registerPeersCommands(program, client)
 registerBlogCommands(program, client)
@@ -93,6 +92,8 @@ registerVaszonCommands(program, sharedOpts, '0.8.0')
 registerWebshopCommands(program, sharedOpts)
 registerApiCommands(program, sharedOpts)
 
+configureCommandErrors(program, () => Boolean(program.opts().json || process.argv.slice(2).includes('--json')))
+
 // Record the invoked command path as "cli <subcommand path>" before each action.
 // This value is picked up by http.ts to populate the X-Haszno-Tool request header.
 program.hook('preAction', (thisCommand) => {
@@ -105,4 +106,7 @@ program.hook('preAction', (thisCommand) => {
   setCurrentCommandPath(`cli ${parts.join(' ')}`.trimEnd())
 })
 
-program.parse()
+program.parseAsync().catch(err => {
+  writeCliError(err)
+  process.exitCode = 1
+})

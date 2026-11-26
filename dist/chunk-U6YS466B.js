@@ -133,6 +133,7 @@ export {
   setCurrentCommandPath,
   SHOP_TOKEN_PREFIX,
   isShopToken,
+  buildAuthHeader,
   request,
   get,
   post,
@@ -140,4 +141,4 @@ export {
   patch,
   del
 };
-//# sourceMappingURL=chunk-35LUSKOJ.js.map
+//# sourceMappingURL=chunk-U6YS466B.js.map

@@ -179,7 +179,7 @@ describe('feeds import-supplier', () => {
     // ensure non-TTY (vitest stdin is never a TTY, but be explicit)
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
 
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const errSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     const program = makeProgram(client)
     await run(
       program,

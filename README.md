@@ -221,7 +221,7 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 | `haszno account ping` | both | Check API connection |
 | `haszno account me` | both | Fetch identity from `/api/v1/auth/me` (name, email, shopId, tokenScope) |
 | `haszno account whoami` | both | Identity + settings; shop-token mode calls `/api/v1/auth/me` automatically |
-| `haszno account doctor` | both | Show credential mode, token scope, and available/blocked command groups |
+| `haszno account doctor` | both | Check API health, authentication, token scope and hosted MCP |
 | `haszno account stats` | legacy | Dashboard summary |
 | `haszno account impact` | legacy | Profit impact meter |
 | `haszno products list` | both | List products |
@@ -342,12 +342,12 @@ Hiba: Hitelesítés szükséges (HTTP 401)  [code: unauthenticated]  [requestId:
   → Futtasd: haszno login
 ```
 
-Pass `--json` for stable machine-readable output on **stdout** (`{ "error": "...", "code": "...", "requestId": "..." }` is never mixed into stdout — errors are always on stderr).
+Pass `--json` for machine-readable results on **stdout**. Command errors use **stderr** as one JSON object with `error` and `code`, plus HTTP `status`, `requestId` and `hint` when available. Exit codes are unchanged.
 
 ### Verifying credentials and token scope
 
 ```bash
-# Show credential mode, token scope, available/blocked command groups
+# Diagnose API health, authentication, and the read-only MCP handshake
 haszno account doctor --json
 
 # Fetch identity live from the server
@@ -356,10 +356,15 @@ haszno account me --json
 
 `haszno account doctor` returns a JSON object with:
 - `credentialMode` — `"shop-token (Bearer)"`, `"api-key (x-api-key)"`, `"Basic"`, or `"nincs hitelesítés"`
-- `apiOk` — `true` / `false`
+- `api.status` — public health result, independent of whether credentials exist
+- `auth.status` and `auth.scope` — identity check result and verified read/write scope, if available
+- `mcp.status` — hosted initialization result; `skipped` without a verified shop token. No tool or write is executed.
+- `apiOk` and `apiError` — legacy identity-check fields; `apiError` is now a safe diagnostic summary rather than raw server text. Use `api.status` for connectivity.
 - `me` — subset of `/api/v1/auth/me` response (name, email, shopName, tokenScope)
 - `availableCommandGroups` — list of command groups that work with the current credential
 - `blockedForShopToken` — operations that return 403 for Bearer tokens (approve/reject/rollback, rules, feeds, settings, import-list, billing)
+
+`doctor` reports its checks as data (including HTTP status when available); it does not use an unsuccessful individual check as the command's exit code.
 
 #### Haszno Manager — napi jelentés és agent-műveletek
 

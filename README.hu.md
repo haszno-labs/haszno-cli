@@ -182,6 +182,10 @@ haszno products list --json | jq '.[] | .name'
 | `--api-url <url>` | API URL felülírása (env: `HASZNO_API_URL`) |
 | `--api-key <key>` | API kulcs felülírása (env: `HASZNO_API_KEY` vagy `HASZNO_API_TOKEN`) |
 
+A `haszno account doctor --json` külön mutatja az API elérhetőségét (`api.status`), a hitelesítés eredményét és a token hatókörét (`auth`), valamint a hosztolt MCP kézfogását (`mcp.status`). MCP-próba csak ellenőrzött bolt-tokennel fut, és nem hív eszközt. A korábbi `apiOk` mező továbbra is az azonosítás sikerét jelzi.
+
+`--json` esetén a parancshibák az stderr-re kerülnek `error` és `code` mezővel, HTTP-hibánál az elérhető `status`, `requestId` és `hint` mezőkkel. A kilépési kódok változatlanok.
+
 ### Parancsok áttekintése
 
 | Parancs | Mód | Leírás |

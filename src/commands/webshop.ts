@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs'
 import type { Command } from 'commander'
 import type { HttpOptions } from '../client/http.js'
 import { callMcpTool } from '../client/mcp.js'
+import { writeCliError } from '../client/cli-error.js'
 
 export type ToolCaller = (name: string, args: Record<string, unknown>) => Promise<string>
 
@@ -76,7 +77,7 @@ export function registerWebshopCommands(program: Command, opts: HttpOptions, cal
     try {
       print(await callTool(name, given(build())), isJsonMode(cmd))
     } catch (err) {
-      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`)
+      writeCliError(err, { json: isJsonMode(cmd) })
       process.exitCode = 1
     }
   }
@@ -155,7 +156,8 @@ export function registerWebshopCommands(program: Command, opts: HttpOptions, cal
   webshop.command('publish').description('A vázlat közzététele — a vásárlók ezt látják').option('--yes', 'megerősítés').option(...slugOpt)
     .action((o: { yes?: boolean; slug?: string }, cmd: Command) => {
       if (!o.yes) {
-        console.error('A közzététel élesíti a vázlatot. Add meg a --yes kapcsolót a megerősítéshez.')
+        writeCliError('A közzététel élesíti a vázlatot. Add meg a --yes kapcsolót a megerősítéshez.',
+          { json: isJsonMode(cmd), code: 'confirmation_required' })
         process.exitCode = 1
         return
       }
@@ -169,7 +171,7 @@ export function registerWebshopCommands(program: Command, opts: HttpOptions, cal
     .option('--args <json>', 'az argumentumok objektuma: JSON, @fájl vagy -', '{}')
     .action((name: string, o: { args: string }, cmd: Command) => {
       if (!/^haszno_(webshop_[a-z_]+|site_builder_skill)$/.test(name)) {
-        console.error('Csak haszno_webshop_* eszköz hívható így.')
+        writeCliError('Csak haszno_webshop_* eszköz hívható így.', { json: isJsonMode(cmd), code: 'invalid_input' })
         process.exitCode = 1
         return
       }

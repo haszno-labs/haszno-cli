@@ -98,15 +98,10 @@ function captureOutput(): { lines: () => string[]; restore: () => void } {
 
 function captureError(): { lines: () => string[]; restore: () => void } {
   const buf: string[] = []
-  const orig = console.error
-  console.error = (...args: unknown[]) => {
-    buf.push(args.map(String).join(' '))
-  }
+  const spy = vi.spyOn(process.stderr, 'write').mockImplementation(chunk => (buf.push(String(chunk)), true))
   return {
     lines: () => buf,
-    restore: () => {
-      console.error = orig
-    },
+    restore: () => spy.mockRestore(),
   }
 }
 

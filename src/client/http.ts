@@ -43,7 +43,7 @@ export interface HttpOptions {
 /** CLI version for User-Agent — keep in sync with package.json */
 const CLI_VERSION = '0.5.0'
 
-function buildAuthHeader(conn: Connection): Record<string, string> {
+export function buildAuthHeader(conn: Connection): Record<string, string> {
   // Never print credentials.
   if (conn.apiKey) {
     // Shop API token → Bearer; any other key → x-api-key (legacy behaviour unchanged).

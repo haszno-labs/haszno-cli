@@ -72,9 +72,7 @@ async function askConfirm(question: string): Promise<boolean> {
 export async function requireConfirm(yes: boolean, message: string): Promise<boolean> {
   if (yes) return true
   if (!process.stdin.isTTY) {
-    console.error(
-      'Hiba: írási művelethez add meg a --yes kapcsolót nem-interaktív módban.',
-    )
+    writeCliError('Írási művelethez add meg a --yes kapcsolót nem-interaktív módban.', { code: 'confirmation_required' })
     // Cast to void so a 'return false' below is reachable (TS sees process.exit as never).
     // At runtime in production the process exits here; in tests with a mocked exit it falls
     // through to the return false, preventing the readline prompt from blocking.
@@ -91,8 +89,7 @@ export async function requireConfirm(yes: boolean, message: string): Promise<boo
  * Typed as void (not never) so callers can follow with 'return' for test isolation.
  */
 function exitWithError(err: unknown): void {
-  const msg = err instanceof Error ? err.message : String(err)
-  console.error(`Hiba: ${msg}`)
+  writeCliError(err)
   ;(process.exit as (code?: number) => void)(1)
 }
 
@@ -305,3 +302,4 @@ export function registerFeedsCommands(program: Command, client: HasznoClient): v
       }
     })
 }
+import { writeCliError } from '../client/cli-error.js'

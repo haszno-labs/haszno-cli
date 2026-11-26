@@ -17,6 +17,7 @@
  *
  * Exit codes: 0 OK, 1 runtime error, 2 usage/validation error.
  */
+import { failCli } from '../client/cli-error.js'
 import type { Command } from 'commander'
 import type {
   HasznoClient,
@@ -137,8 +138,7 @@ function printActionDetail(action: AgentAction): void {
 }
 
 function die(msg: string, code = 1): never {
-  process.stderr.write(`Hiba: ${msg}\n`)
-  process.exit(code)
+  return failCli(msg, code)
 }
 
 const ALLOWED_STATUSES: ActionStatus[] = ['javasolt', 'vegrehajtva', 'elutasitva', 'hiba', 'visszavonva']

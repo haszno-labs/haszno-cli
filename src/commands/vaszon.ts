@@ -10,6 +10,7 @@
  *
  * Needs once:  npm install -g @agentclientprotocol/claude-agent-acp
  */
+import { failCli } from '../client/cli-error.js'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -145,8 +146,7 @@ export function registerVaszonCommands(program: Command, sharedOpts: { baseUrl?:
     .action(async (opts: { port: string; open?: boolean; allowOrigin?: string[] }) => {
       const port = Number(opts.port)
       if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-        process.stderr.write('Érvénytelen port (1024–65535).\n')
-        process.exit(1)
+        failCli('Érvénytelen port (1024–65535).\n', 1)
       }
 
       const conn = resolveConnection(sharedOpts)

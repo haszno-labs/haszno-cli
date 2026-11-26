@@ -7,6 +7,7 @@
  *   haszno peers list                                          list own invites
  *   haszno peers accept <code> --acceptor <shopId> [--yes]    accept an invite
  */
+import { failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, PeerInvite } from '../client/index.js'
 
@@ -76,8 +77,7 @@ export function registerPeersCommands(program: Command, client: HasznoClient): v
           console.log(`\nAdd át a kódot a partnernek: haszno peers accept ${invite.code} --acceptor <bolt_azonosito> --yes`)
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 
@@ -94,8 +94,7 @@ export function registerPeersCommands(program: Command, client: HasznoClient): v
           printInvitesTable(invites)
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 
@@ -123,8 +122,7 @@ export function registerPeersCommands(program: Command, client: HasznoClient): v
           console.log(`  Partner:   ${link.partner}`)
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 }
