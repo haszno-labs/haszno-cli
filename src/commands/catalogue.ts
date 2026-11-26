@@ -13,6 +13,7 @@
  *
  *   haszno connections list [--status <s>]
  */
+import { failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type {
   HasznoClient,
@@ -169,8 +170,7 @@ export function registerCatalogueCommands(program: Command, client: HasznoClient
           }
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 
@@ -200,8 +200,7 @@ export function registerCatalogueCommands(program: Command, client: HasznoClient
           printImportListTable(items)
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 
@@ -222,8 +221,7 @@ export function registerCatalogueCommands(program: Command, client: HasznoClient
           console.log(`Hozzáadva: ${result.added} termék, kihagyva (már listán): ${result.skipped}`)
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 
@@ -270,8 +268,7 @@ export function registerCatalogueCommands(program: Command, client: HasznoClient
           }
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 
@@ -298,8 +295,7 @@ export function registerCatalogueCommands(program: Command, client: HasznoClient
           printConnectionsTable(conns)
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 }

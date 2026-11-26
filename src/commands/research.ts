@@ -7,6 +7,7 @@
  *
  * Exit codes: 0 OK, 1 runtime error, 2 usage/validation error.
  */
+import { failCli } from '../client/cli-error.js'
 import { readFileSync } from 'node:fs'
 import type { Command } from 'commander'
 import type { HasznoClient, ResearchBrief, FindingsInput, DailyReport } from '../client/index.js'
@@ -60,8 +61,7 @@ function printPostResult(report: DailyReport): void {
 }
 
 function die(msg: string, code = 1): never {
-  process.stderr.write(`Hiba: ${msg}\n`)
-  process.exit(code)
+  return failCli(msg, code)
 }
 
 async function readStdin(): Promise<string> {

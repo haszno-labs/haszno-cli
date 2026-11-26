@@ -31,10 +31,11 @@ import { dirname } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { Command } from 'commander'
 import type { HasznoClient } from '../client/index.js'
-import { HasznoApiError } from '../client/index.js'
 import { CONFIG_PATH, readConfigFile, readConfigObject, type HasznoConfig } from '../client/config.js'
 import { type HttpOptions } from '../client/http.js'
 import { cliLogin } from '../client/shop.js'
+import { checkDoctor } from '../client/doctor.js'
+import { failCli } from '../client/cli-error.js'
 
 export { CONFIG_PATH, LEGACY_CONFIG_PATH, readConfigFile, type HasznoConfig } from '../client/config.js'
 
@@ -69,31 +70,8 @@ export function printKv(rows: Array<[string, string | number | boolean]>): void 
 
 // ── Error handling ───────────────────────────────────────────────────────────
 
-/** Map well-known API error codes to a one-line next-step hint (Hungarian). */
-function nextStepHint(status: number, code?: string): string | undefined {
-  if (status === 401 || code === 'unauthenticated') return 'Futtasd: haszno login'
-  if (status === 403 || code === 'forbidden') return 'Ellenőrizd a token hatókörét (read/write) és a bolt-token korlátozásait.'
-  if (status === 404 || code === 'not_found') return 'Ellenőrizd az azonosítót.'
-  if (status === 409 || code === 'conflict') return 'Ismételt nonce: kérj új azonosítót (randomUUID), vagy keresd a GET listában az eredeti bejegyzést.'
-  if (status === 422 || code === 'unprocessable') return 'Ellenőrizd az árszintet: a javasolt ár nem lehet az ár-minimum alatt.'
-  if (status === 429 || code === 'rate_limited') return 'Túl sok kérés — várj egy percet és próbáld újra.'
-  return undefined
-}
-
 export function handleError(err: unknown): never {
-  if (err instanceof HasznoApiError) {
-    let msg = `Hiba: ${err.message} (HTTP ${err.status})`
-    if (err.code) msg += `  [code: ${err.code}]`
-    if (err.requestId) msg += `  [requestId: ${err.requestId}]`
-    process.stderr.write(msg + '\n')
-    const hint = nextStepHint(err.status, err.code)
-    if (hint) process.stderr.write(`  → ${hint}\n`)
-  } else if (err instanceof Error) {
-    process.stderr.write(`Hiba: ${err.message}\n`)
-  } else {
-    process.stderr.write(`Hiba: ${String(err)}\n`)
-  }
-  process.exit(1)
+  return failCli(err)
 }
 
 // ── Interactive helpers ──────────────────────────────────────────────────────
@@ -196,11 +174,10 @@ export function registerAccountCommands(
 
         if (!email || !password) {
           if (!process.stdin.isTTY) {
-            process.stderr.write(
+            failCli(
               'Interaktív mód TTY nélkül nem elérhető. ' +
-              'Állítsd be a HASZNO_EMAIL és HASZNO_PASSWORD változókat.\n',
+              'Állítsd be a HASZNO_EMAIL és HASZNO_PASSWORD változókat.', 2, { code: 'credentials_required' },
             )
-            process.exit(2)
             return
           }
           process.stdout.write('Haszno bejelentkezés\n')
@@ -310,11 +287,10 @@ export function registerAccountCommands(
 
     if (!apiUrl && !apiKey) {
       if (!process.stdin.isTTY) {
-        process.stderr.write(
+        failCli(
           'Interaktív mód TTY nélkül nem elérhető. ' +
-          'Adj meg --api-url és/vagy --api-key paramétert.\n',
+          'Adj meg --api-url és/vagy --api-key paramétert.', 2,
         )
-        process.exit(2)
         return
       }
       process.stdout.write('Haszno CLI konfiguráció\n')
@@ -375,7 +351,7 @@ export function registerAccountCommands(
       // Detect credential mode so we route to the right endpoint
       const { resolveConnection } = await import('../client/config.js')
       const { isShopToken } = await import('../client/http.js')
-      const conn = resolveConnection(httpOpts, process.env)
+      const conn = resolveConnection(httpOpts, process.env, httpOpts.readConfig)
       const isShop = isShopToken(conn.apiKey)
 
       try {
@@ -461,8 +437,7 @@ export function registerAccountCommands(
     .action(async (opts: { days: string }, cmd: Command) => {
       const days = parseInt(opts.days, 10)
       if (isNaN(days) || days < 1) {
-        process.stderr.write('Ervenytelen --days ertek; pozitiv egesz szamot adj meg.\n')
-        process.exit(2)
+        failCli('Ervenytelen --days ertek; pozitiv egesz szamot adj meg.', 2)
         return
       }
       try {
@@ -547,10 +522,7 @@ export function registerAccountCommands(
       cmd: Command,
     ) => {
       if (!opts.undercutPct && !opts.minMarginPct && !opts.vatPct) {
-        process.stderr.write(
-          'Legalabb egy opciót adj meg: --undercut-pct, --min-margin-pct, --vat-pct\n',
-        )
-        process.exit(2)
+        failCli('Legalabb egy opciót adj meg: --undercut-pct, --min-margin-pct, --vat-pct', 2)
         return
       }
 
@@ -566,17 +538,13 @@ export function registerAccountCommands(
         (minMarginPct !== undefined && (isNaN(minMarginPct) || minMarginPct < 0)) ||
         (vatPct !== undefined && (isNaN(vatPct) || vatPct < 0))
       ) {
-        process.stderr.write(
-          'Ervenytelen szam; az ertekeknek nem negativ szamoknak kell lenniuk.\n',
-        )
-        process.exit(2)
+        failCli('Ervenytelen szam; az ertekeknek nem negativ szamoknak kell lenniuk.', 2)
         return
       }
 
       if (!opts.yes) {
         if (!process.stdin.isTTY) {
-          process.stderr.write('Irasi muvelethez --yes szukseges nem-interaktiv modban.\n')
-          process.exit(2)
+          failCli('Irasi muvelethez --yes szukseges nem-interaktiv modban.', 2, { code: 'confirmation_required' })
           return
         }
         const ok = await askConfirm('Biztosan frissited az arazasi beallitasokat?')
@@ -643,24 +611,10 @@ export function registerAccountCommands(
   // doctor ──────────────────────────────────────────────────────────────────
   account
     .command('doctor')
-    .description('Hitelesítési mód, token hatókör és elérhető parancsok ellenőrzése')
+    .description('API-kapcsolat, hitelesítés, token hatókör és MCP ellenőrzése')
     .action(async (_opts: Record<string, unknown>, cmd: Command) => {
-      const { resolveConnection } = await import('../client/config.js')
-      const { isShopToken } = await import('../client/http.js')
-      const conn = resolveConnection(httpOpts, process.env)
-      const isShop = isShopToken(conn.apiKey)
-      const credentialMode = isShop ? 'shop-token (Bearer)' : conn.apiKey ? 'api-key (x-api-key)' : conn.basicAuth ? 'Basic' : 'nincs hitelesítés'
-
-      let apiOk = false
-      let me: { email?: string; name?: string; shopName?: string; shopId?: number; tokenScope?: string } = {}
-      let apiError: string | undefined
-      try {
-        const { get: httpGet } = await import('../client/http.js')
-        me = await httpGet<typeof me>('/api/v1/auth/me', httpOpts)
-        apiOk = true
-      } catch (err) {
-        apiError = err instanceof Error ? err.message : String(err)
-      }
+      const { isShop, ...checks } = await checkDoctor(httpOpts)
+      const { credentialMode, me, api, auth, mcp } = checks
 
       const groups = isShop
         ? ['products (read)', 'orders (read)', 'proposals list/propose', 'shop (scope-gated)', 'account me/doctor']
@@ -670,10 +624,7 @@ export function registerAccountCommands(
         : []
 
       const data = {
-        credentialMode,
-        apiOk,
-        apiError: apiError ?? null,
-        me,
+        ...checks,
         availableCommandGroups: groups,
         blockedForShopToken: blocked,
       }
@@ -682,7 +633,10 @@ export function registerAccountCommands(
         printJson(data)
       } else {
         process.stdout.write(`Hitelesítési mód: ${credentialMode}\n`)
-        process.stdout.write(`API kapcsolat:   ${apiOk ? 'OK' : `HIBA — ${apiError ?? 'ismeretlen'}`}\n`)
+        const status = (check: typeof api) => check.httpStatus ? `${check.status} (HTTP ${check.httpStatus})` : check.status
+        process.stdout.write(`API kapcsolat:   ${status(api)}\n`)
+        process.stdout.write(`Hitelesítés:     ${status(auth)}\n`)
+        process.stdout.write(`MCP kapcsolat:   ${status(mcp)}\n`)
         if (me.name) process.stdout.write(`Felhasználó:     ${me.name}${me.shopName ? ` (${me.shopName})` : ''}\n`)
         if (me.tokenScope) process.stdout.write(`Token hatókör:   ${me.tokenScope}\n`)
         process.stdout.write('\nElérhető parancscsoportok:\n')
@@ -691,7 +645,7 @@ export function registerAccountCommands(
           process.stdout.write('\nLetiltott (bolt-token korlátozás):\n')
           for (const b of blocked) process.stdout.write(`  ✗ ${b}\n`)
         }
-        if (!apiOk) {
+        if (auth.status === 'missing' || auth.status === 'unauthenticated') {
           process.stdout.write('\nTipp: futtasd a `haszno login` parancsot a hitelesítés megújításához.\n')
         }
       }
@@ -764,8 +718,7 @@ export function registerAccountCommands(
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id) || id <= 0) {
-        process.stderr.write('Érvénytelen token azonosító.\n')
-        process.exit(2)
+        failCli('Érvénytelen token azonosító.', 2)
         return
       }
       try {

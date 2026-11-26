@@ -17,6 +17,7 @@
  *   1  runtime error (API failure, etc.)
  *   2  usage error / validation failure
  */
+import { failCli, writeCliError } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, RecommendationItem, Recommendations } from '../client/index.js'
 import * as readline from 'node:readline'
@@ -85,13 +86,7 @@ function buildListCommand(rootProgram: Command, client: HasznoClient): Command {
       try {
         recs = await client.recommendations.get()
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (json) {
-          console.error(JSON.stringify({ error: msg }))
-        } else {
-          console.error(`Hiba a javaslatok lekérésekor: ${msg}`)
-        }
-        process.exit(1)
+        failCli(err, 1, { json })
       }
 
       let items: RecommendationItem[] = recs.items ?? []
@@ -99,8 +94,7 @@ function buildListCommand(rootProgram: Command, client: HasznoClient): Command {
       // Filters
       if (opts.minScore != null) {
         if (isNaN(opts.minScore) || opts.minScore < 0 || opts.minScore > 100) {
-          console.error('Hiba: --min-score 0 és 100 közötti szám legyen.')
-          process.exit(2)
+          failCli('Hiba: --min-score 0 és 100 közötti szám legyen.', 2)
         }
         items = items.filter((it) => (it.trendScore ?? 0) >= opts.minScore!)
       }
@@ -119,8 +113,7 @@ function buildListCommand(rootProgram: Command, client: HasznoClient): Command {
 
       if (opts.limit != null) {
         if (isNaN(opts.limit) || opts.limit < 1) {
-          console.error('Hiba: --limit legalább 1 legyen.')
-          process.exit(2)
+          failCli('Hiba: --limit legalább 1 legyen.', 2)
         }
         items = items.slice(0, opts.limit)
       }
@@ -197,7 +190,7 @@ function buildFillKeywordsCommand(rootProgram: Command, client: HasznoClient): C
       if (!confirmed) {
         const msg = 'Megszakítva. Használd a --yes kapcsolót a megerősítéshez.'
         if (json) {
-          console.error(JSON.stringify({ error: msg, hint: 'pass --yes to confirm' }))
+          writeCliError(msg, { json, code: 'confirmation_required' })
         } else {
           console.log(msg)
         }
@@ -208,13 +201,7 @@ function buildFillKeywordsCommand(rootProgram: Command, client: HasznoClient): C
       try {
         result = await client.recommendations.fillTrendKeywords()
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (json) {
-          console.error(JSON.stringify({ error: msg }))
-        } else {
-          console.error(`Hiba a kulcsszófrissítés során: ${msg}`)
-        }
-        process.exit(1)
+        failCli(err, 1, { json })
       }
 
       if (json) {

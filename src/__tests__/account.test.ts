@@ -10,6 +10,13 @@ import {
   writeConfigFile,
 } from '../commands/account.js'
 
+beforeEach(() => {
+  for (const key of ['HASZNO_API_TOKEN', 'HASZNO_API_KEY', 'HASZNO_BASIC', 'ARFUTAR_API_KEY', 'ARFUTAR_BASIC']) {
+    vi.stubEnv(key, undefined)
+  }
+})
+afterEach(() => vi.unstubAllEnvs())
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeClient(overrides: Partial<Record<string, unknown>> = {}): HasznoClient {
@@ -55,7 +62,7 @@ function buildProgram(client: HasznoClient, configPath?: string) {
     .version('0.1.0')
     .option('--json', 'JSON output')
     .exitOverride()
-  registerAccountCommands(prog, client, configPath ? { configPath } : {})
+  registerAccountCommands(prog, client, { configPath, httpOpts: { readConfig: () => ({}) } })
   return prog
 }
 
@@ -80,6 +87,60 @@ function mockExit() {
     throw new Error('process.exit called')
   }) as typeof process.exit)
 }
+
+describe('account doctor', () => {
+  it('distinguishes an available health endpoint from missing authentication without leaking saved keys', async () => {
+    const http = vi.fn().mockResolvedValue(Response.json({ ok: true }))
+    const program = new Command().option('--json').exitOverride()
+    registerAccountCommands(program, makeClient(), { httpOpts: {
+      baseUrl: 'https://diagnostics.example', fetch: http,
+      readConfig: () => ({ apiUrl: 'https://other.example', apiKey: 'haszno_other_fixture' }),
+    } })
+    const output = captureOutput()
+    try {
+      await program.parseAsync(['account', 'doctor', '--json'], { from: 'user' })
+      expect(JSON.parse(output.text())).toMatchObject({
+        apiOk: false,
+        api: { status: 'ok', httpStatus: 200 },
+        auth: { status: 'missing', scope: null },
+        mcp: { status: 'skipped' },
+      })
+      expect(http).toHaveBeenCalledTimes(1)
+      expect(http).toHaveBeenCalledWith('https://diagnostics.example/api/health', expect.objectContaining({ redirect: 'manual' }))
+      expect(JSON.stringify(http.mock.calls)).not.toContain('haszno_other_fixture')
+    } finally {
+      output.restore()
+    }
+  })
+
+  it('reports API reachability, the authenticated scope, and HTTP MCP authorization separately', async () => {
+    const http = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true }))
+      .mockResolvedValueOnce(Response.json({ tokenScope: 'read', name: 'Smoke', apiKey: 'haszno_fixture_token' }))
+      .mockResolvedValueOnce(Response.json({ error: 'haszno_fixture_token' }, { status: 403 }))
+    const program = new Command().option('--json').exitOverride()
+    registerAccountCommands(program, makeClient(), { httpOpts: {
+      baseUrl: 'https://diagnostics.example', apiKey: 'haszno_fixture_token', fetch: http,
+    } })
+    const output = captureOutput()
+    try {
+      await program.parseAsync(['account', 'doctor', '--json'], { from: 'user' })
+      expect(JSON.parse(output.text())).toMatchObject({
+        apiOk: true, api: { status: 'ok' },
+        auth: { status: 'ok', scope: 'read' },
+        mcp: { status: 'forbidden', httpStatus: 403 },
+      })
+      expect(output.text()).not.toContain('haszno_fixture_token')
+      expect(http.mock.calls.map(([url, init]) => [url, init?.redirect])).toEqual([
+        ['https://diagnostics.example/api/health', 'manual'],
+        ['https://diagnostics.example/api/v1/auth/me', 'manual'],
+        ['https://diagnostics.example/api/mcp', 'manual'],
+      ])
+    } finally {
+      output.restore()
+    }
+  })
+})
 
 // ── Config file tests ─────────────────────────────────────────────────────────
 

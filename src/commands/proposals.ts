@@ -12,6 +12,7 @@
  * Writes need --yes; without it the command explains what would happen and exits 0.
  * Exit codes: 0 = ok, 1 = API/runtime error, 2 = usage error.
  */
+import { failCli } from '../client/cli-error.js'
 import { randomUUID } from 'node:crypto'
 import { Command } from 'commander'
 import type { HasznoClient, Proposal, ProposalStatus, ApproveResult, RollbackResult, AgentProposalResult } from '../client/index.js'
@@ -110,8 +111,7 @@ function parseIds(raw: string): number[] {
 }
 
 function die(msg: string, code = 1): never {
-  process.stderr.write(`Hiba: ${msg}\n`)
-  process.exit(code)
+  return failCli(msg, code)
 }
 
 // ── register ─────────────────────────────────────────────────────────────────

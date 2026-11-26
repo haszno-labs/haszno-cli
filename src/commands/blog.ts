@@ -7,6 +7,7 @@
  *
  * Legal: data always aggregated from >= 5 shops; no per-shop info.
  */
+import { failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, BlogPost } from '../client/index.js'
 
@@ -77,8 +78,7 @@ export function registerBlogCommands(program: Command, client: HasznoClient): vo
           }
         }
       } catch (e) {
-        console.error('Hiba:', e instanceof Error ? e.message : String(e))
-        process.exit(1)
+        failCli(e)
       }
     })
 }

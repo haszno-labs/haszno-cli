@@ -13,6 +13,7 @@
  *   1  runtime error (API error, order not found, …)
  *   2  usage error (missing required argument, bad flag value, …)
  */
+import { failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, Order } from '../client/index.js'
 
@@ -133,15 +134,13 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
     )
     .action(async (opts: { status?: string }, cmd: Command) => {
       if (opts.status && !VALID_STATUSES.includes(opts.status as ValidStatus)) {
-        console.error(`Hiba: érvénytelen állapot "${opts.status}". Lehetséges értékek: ${VALID_STATUSES.join(', ')}`)
-        process.exit(2)
+        failCli(`Hiba: érvénytelen állapot "${opts.status}". Lehetséges értékek: ${VALID_STATUSES.join(', ')}`, 2)
       }
       let list: Order[]
       try {
         list = await client.orders.list()
       } catch (err) {
-        console.error('API hiba:', err instanceof Error ? err.message : String(err))
-        process.exit(1)
+        failCli(err)
       }
       if (opts.status) {
         list = list.filter((o) => o.status === opts.status)
@@ -160,20 +159,17 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
     .action(async (idStr: string, _opts: unknown, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id) || id <= 0) {
-        console.error('Hiba: az <id> egész szám kell legyen.')
-        process.exit(2)
+        failCli('Hiba: az <id> egész szám kell legyen.', 2)
       }
       let list: Order[]
       try {
         list = await client.orders.list()
       } catch (err) {
-        console.error('API hiba:', err instanceof Error ? err.message : String(err))
-        process.exit(1)
+        failCli(err)
       }
       const order = list.find((o) => o.id === id)
       if (!order) {
-        console.error(`Hiba: a #${id} rendelés nem található.`)
-        process.exit(1)
+        failCli(`Hiba: a #${id} rendelés nem található.`, 1)
       }
       if (isJsonMode(cmd)) {
         process.stdout.write(JSON.stringify(order, null, 2) + '\n')
@@ -190,8 +186,7 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
     .action(async (idStr: string, opts: { yes?: boolean }, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id) || id <= 0) {
-        console.error('Hiba: az <id> egész szám kell legyen.')
-        process.exit(2)
+        failCli('Hiba: az <id> egész szám kell legyen.', 2)
       }
       if (!opts.yes) {
         const ok = await interactiveConfirm(`Biztosan szállítottként jelöled a #${id} rendelést?`)
@@ -204,8 +199,7 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
       try {
         updated = await client.orders.ship(id)
       } catch (err) {
-        console.error('API hiba:', err instanceof Error ? err.message : String(err))
-        process.exit(1)
+        failCli(err)
       }
       if (isJsonMode(cmd)) {
         process.stdout.write(JSON.stringify(updated, null, 2) + '\n')
@@ -231,8 +225,7 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
       try {
         result = await client.orders.createDemo()
       } catch (err) {
-        console.error('API hiba:', err instanceof Error ? err.message : String(err))
-        process.exit(1)
+        failCli(err)
       }
       if (isJsonMode(cmd)) {
         process.stdout.write(JSON.stringify(result, null, 2) + '\n')

@@ -82,9 +82,7 @@ function captureConsole() {
   const logSpy = vi.spyOn(console, 'log').mockImplementation((...args) => {
     lines.push(args.map(String).join(' '))
   })
-  const errSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
-    errLines.push(args.map(String).join(' '))
-  })
+  const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(chunk => (errLines.push(String(chunk)), true))
   return {
     lines,
     errLines,

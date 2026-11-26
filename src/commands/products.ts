@@ -13,6 +13,7 @@
  *
  * Exit codes: 0 OK, 1 runtime error, 2 usage/validation error.
  */
+import { failCli, writeCliError } from '../client/cli-error.js'
 import readline from 'node:readline'
 import type { Command } from 'commander'
 import type { HasznoClient, Product } from '../client/index.js'
@@ -130,7 +131,7 @@ export async function cmdShow(client: HasznoClient, id: number, opts: ShowOpts):
   const products = await client.products.list({ all: true })
   const p = products.find(x => x.id === id)
   if (!p) {
-    console.error(`Nem található termék: ${id}`)
+    writeCliError(`Nem található termék: ${id}`)
     process.exitCode = 1
     return
   }
@@ -175,7 +176,7 @@ export async function cmdUpdate(client: HasznoClient, id: number, opts: UpdateOp
   if (opts.price !== undefined) body.priceGross = Number(opts.price)
 
   if (Object.keys(body).length === 0) {
-    console.error('Legalább egy mezőt meg kell adni: --market-min, --market-shop vagy --price')
+    writeCliError('Legalább egy mezőt meg kell adni: --market-min, --market-shop vagy --price', { code: 'invalid_input' })
     process.exitCode = 2
     return
   }
@@ -210,7 +211,7 @@ export interface ListingOpts {
 
 export async function cmdListing(client: HasznoClient, id: number, opts: ListingOpts): Promise<void> {
   if (!opts.on && !opts.off) {
-    console.error('Add meg: --on (listáz) vagy --off (levesz a listáról)')
+    writeCliError('Add meg: --on (listáz) vagy --off (levesz a listáról)', { code: 'invalid_input' })
     process.exitCode = 2
     return
   }
@@ -327,12 +328,7 @@ export async function cmdImpact(client: HasznoClient, opts: ImpactOpts): Promise
 // ── Commander registration ────────────────────────────────────────────────────
 
 function handleError(err: unknown): never {
-  if (err instanceof Error) {
-    console.error('Hiba:', err.message)
-  } else {
-    console.error('Ismeretlen hiba:', String(err))
-  }
-  process.exit(1)
+  return failCli(err)
 }
 
 export function registerProductsCommands(program: Command, client: HasznoClient): void {

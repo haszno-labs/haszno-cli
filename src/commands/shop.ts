@@ -46,6 +46,7 @@
  * Note: reserving is free — payment happens directly between buyer and seller.
  */
 
+import { failCli } from '../client/cli-error.js'
 import { createInterface } from 'node:readline'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
@@ -152,8 +153,7 @@ function parseAttrs(pairs: string[]): Record<string, string> {
   for (const pair of pairs) {
     const eq = pair.indexOf('=')
     if (eq < 1) {
-      process.stderr.write(`Érvénytelen --attr érték: "${pair}" (formátum: kulcs=érték)\n`)
-      process.exit(2)
+      failCli(`Érvénytelen --attr érték: "${pair}" (formátum: kulcs=érték)\n`, 2)
     }
     result[pair.slice(0, eq)] = pair.slice(eq + 1)
   }
@@ -167,11 +167,10 @@ function validateRequiredAttrs(
   const missing = required.filter((a) => !attrs[a.key])
   if (missing.length > 0) {
     const names = missing.map((a) => `"${a.key}" (${a.label})`).join(', ')
-    process.stderr.write(
+    failCli(
       `Hiányzó kötelező attribútum${missing.length > 1 ? 'ok' : ''}: ${names}\n` +
-        'Add meg: --attr kulcs=érték\n',
+        'Add meg: --attr kulcs=érték', 2,
     )
-    process.exit(2)
   }
 }
 
@@ -267,8 +266,7 @@ export function registerShopCommands(
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id)) {
-        process.stderr.write('Érvénytelen hirdetés-azonosító.\n')
-        process.exit(2)
+        failCli('Érvénytelen hirdetés-azonosító.\n', 2)
         return
       }
       try {
@@ -448,8 +446,7 @@ export function registerShopCommands(
           }
 
           if (!body.title) {
-            process.stderr.write('A --title megadása kötelező (vagy --from-photos az AI-javaslathoz).\n')
-            process.exit(2)
+            failCli('A --title megadása kötelező (vagy --from-photos az AI-javaslathoz).\n', 2)
             return
           }
 
@@ -468,8 +465,7 @@ export function registerShopCommands(
           if (!body.contactName) missing.push('--contact-name')
           if (!body.contactEmail) missing.push('--contact-email')
           if (missing.length > 0) {
-            process.stderr.write(`Hiányzó kötelező mező${missing.length > 1 ? 'k' : ''}: ${missing.join(', ')}\n`)
-            process.exit(2)
+            failCli(`Hiányzó kötelező mező${missing.length > 1 ? 'k' : ''}: ${missing.join(', ')}\n`, 2)
             return
           }
 
@@ -554,8 +550,7 @@ export function registerShopCommands(
       ) => {
         const id = parseInt(idStr, 10)
         if (isNaN(id)) {
-          process.stderr.write('Érvénytelen azonosító.\n')
-          process.exit(2)
+          failCli('Érvénytelen azonosító.\n', 2)
           return
         }
         try {
@@ -594,7 +589,7 @@ export function registerShopCommands(
     .description('Hirdetés szüneteltetése')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const ad = await shopClient.myAds.pause(id)
         if (getJsonFlag(cmd)) printJson(ad)
@@ -608,7 +603,7 @@ export function registerShopCommands(
     .description('Hirdetés aktiválása')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const ad = await shopClient.myAds.activate(id)
         if (getJsonFlag(cmd)) printJson(ad)
@@ -623,7 +618,7 @@ export function registerShopCommands(
     .option('--price <Ft>', 'Tényleges eladási ár (bruttó Ft)')
     .action(async (idStr: string, opts: { price?: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const body = opts.price ? { soldPriceGross: parseInt(opts.price, 10) } : {}
         const ad = await shopClient.myAds.sold(id, body)
@@ -638,7 +633,7 @@ export function registerShopCommands(
     .description('Hirdetés megújítása')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const ad = await shopClient.myAds.renew(id)
         if (getJsonFlag(cmd)) printJson(ad)
@@ -652,7 +647,7 @@ export function registerShopCommands(
     .description('Hirdetés törlése')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const result = await shopClient.myAds.delete(id)
         if (getJsonFlag(cmd)) printJson(result)
@@ -693,10 +688,10 @@ export function registerShopCommands(
     .option('--message <szöveg>', 'Üzenet szövege (kötelező)')
     .action(async (adIdStr: string, opts: { name?: string; email?: string; phone?: string; message?: string }, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
-      if (isNaN(adId)) { process.stderr.write('Érvénytelen hirdetés-azonosító.\n'); process.exit(2); return }
-      if (!opts.name) { process.stderr.write('--name megadása kötelező.\n'); process.exit(2); return }
-      if (!opts.email) { process.stderr.write('--email megadása kötelező.\n'); process.exit(2); return }
-      if (!opts.message) { process.stderr.write('--message megadása kötelező.\n'); process.exit(2); return }
+      if (isNaN(adId)) { failCli('Érvénytelen hirdetés-azonosító.\n', 2); return }
+      if (!opts.name) { failCli('--name megadása kötelező.\n', 2); return }
+      if (!opts.email) { failCli('--email megadása kötelező.\n', 2); return }
+      if (!opts.message) { failCli('--message megadása kötelező.\n', 2); return }
       try {
         const body: { name: string; email: string; phone?: string; message: string } = {
           name: opts.name,
@@ -716,7 +711,7 @@ export function registerShopCommands(
     .description('Hirdetés mentése kedvencekbe')
     .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
-      if (isNaN(adId)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(adId)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const result = await shopClient.favorites.add(adId)
         if (getJsonFlag(cmd)) printJson(result)
@@ -730,7 +725,7 @@ export function registerShopCommands(
     .description('Hirdetés eltávolítása kedvencekből')
     .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
-      if (isNaN(adId)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(adId)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const result = await shopClient.favorites.remove(adId)
         if (getJsonFlag(cmd)) printJson(result)
@@ -768,7 +763,7 @@ export function registerShopCommands(
         cmd: Command,
       ) => {
         const adId = parseInt(adIdStr, 10)
-        if (isNaN(adId)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+        if (isNaN(adId)) { failCli('Érvénytelen azonosító.\n', 2); return }
 
         if (!opts.yes) {
           process.stdout.write(
@@ -845,7 +840,7 @@ export function registerShopCommands(
     .option('--held-until <ISO>', 'Határidő a vevőnek (ISO-8601 dátum/idő)')
     .action(async (idStr: string, opts: { heldUntil?: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const { reservation: r } = await shopClient.reservations.accept(id, { heldUntil: opts.heldUntil })
         if (getJsonFlag(cmd)) printJson(r)
@@ -858,7 +853,7 @@ export function registerShopCommands(
     .description('Foglalás elutasítása (eladóként)')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const { reservation: r } = await shopClient.reservations.decline(id)
         if (getJsonFlag(cmd)) printJson(r)
@@ -871,7 +866,7 @@ export function registerShopCommands(
     .description('Foglalás lemondása (vevőként)')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const { reservation: r } = await shopClient.reservations.cancel(id)
         if (getJsonFlag(cmd)) printJson(r)
@@ -885,7 +880,7 @@ export function registerShopCommands(
     .option('--price <Ft>', 'Tényleges eladási ár (bruttó Ft)')
     .action(async (idStr: string, opts: { price?: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const body = opts.price ? { soldPriceGross: parseInt(opts.price, 10) } : {}
         const { reservation: r } = await shopClient.reservations.complete(id, body)
@@ -901,9 +896,9 @@ export function registerShopCommands(
     .requiredOption('--price <Ft>', 'Ellenajánlott ár (bruttó Ft)')
     .action(async (idStr: string, opts: { price: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       const price = parseInt(opts.price, 10)
-      if (isNaN(price) || price <= 0) { process.stderr.write('Érvénytelen ár.\n'); process.exit(2); return }
+      if (isNaN(price) || price <= 0) { failCli('Érvénytelen ár.\n', 2); return }
       try {
         const { reservation: r } = await shopClient.reservations.counter(id, price)
         if (getJsonFlag(cmd)) printJson(r)
@@ -917,7 +912,7 @@ export function registerShopCommands(
     .description('Eladói ellenajánlat elfogadása (vevőként)')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const { reservation: r } = await shopClient.reservations.acceptCounter(id)
         if (getJsonFlag(cmd)) printJson(r)
@@ -931,7 +926,7 @@ export function registerShopCommands(
     .description('Foglalás üzenetei')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const { items } = await shopClient.reservations.messages(id)
         if (getJsonFlag(cmd)) {
@@ -953,8 +948,8 @@ export function registerShopCommands(
     .requiredOption('--text <szöveg>', 'Üzenet szövege (1–2000 karakter)')
     .action(async (idStr: string, opts: { text: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
-      if (!opts.text.trim()) { process.stderr.write('--text megadása kötelező.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
+      if (!opts.text.trim()) { failCli('--text megadása kötelező.\n', 2); return }
       try {
         const { message: m } = await shopClient.reservations.message(id, opts.text)
         if (getJsonFlag(cmd)) printJson(m)
@@ -970,11 +965,10 @@ export function registerShopCommands(
     .option('--comment <szöveg>', 'Szöveges megjegyzés (max. 1000 karakter)')
     .action(async (idStr: string, opts: { rating: string; comment?: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       const rating = parseInt(opts.rating, 10)
       if (isNaN(rating) || rating < 1 || rating > 5) {
-        process.stderr.write('--rating értéke 1 és 5 közé kell essen.\n')
-        process.exit(2)
+        failCli('--rating értéke 1 és 5 közé kell essen.\n', 2)
         return
       }
       try {
@@ -995,8 +989,8 @@ export function registerShopCommands(
     .requiredOption('--message <szöveg>', 'Válasz szövege (1–2000 karakter)')
     .action(async (idStr: string, opts: { message: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
-      if (!opts.message.trim()) { process.stderr.write('--message megadása kötelező.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
+      if (!opts.message.trim()) { failCli('--message megadása kötelező.\n', 2); return }
       try {
         const { reply } = await shopClient.inquiries.reply(id, opts.message)
         if (getJsonFlag(cmd)) printJson(reply)
@@ -1080,7 +1074,7 @@ export function registerShopCommands(
     .description('Mentett keresés törlése')
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
-      if (isNaN(id)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(id)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const result = await shopClient.savedSearches.remove(id)
         if (getJsonFlag(cmd)) printJson(result)
@@ -1094,7 +1088,7 @@ export function registerShopCommands(
     .description('Feliratkozás áresés-értesítőre egy hirdetésnél')
     .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
-      if (isNaN(adId)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(adId)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const result = await shopClient.watch.watch(adId)
         if (getJsonFlag(cmd)) printJson(result)
@@ -1107,7 +1101,7 @@ export function registerShopCommands(
     .description('Leiratkozás áresés-értesítőről')
     .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
-      if (isNaN(adId)) { process.stderr.write('Érvénytelen azonosító.\n'); process.exit(2); return }
+      if (isNaN(adId)) { failCli('Érvénytelen azonosító.\n', 2); return }
       try {
         const result = await shopClient.watch.unwatch(adId)
         if (getJsonFlag(cmd)) printJson(result)
@@ -1169,8 +1163,7 @@ export function registerShopCommands(
             partnerCommissionPct: 0,
           }
           if (!body.title) {
-            process.stderr.write('Nem sikerült automatikusan feladni: cím hiányzik. Adj meg --title és a kötelező mezőket kézzel a "haszno shop post" paranccsal.\n')
-            process.exit(2)
+            failCli('Nem sikerült automatikusan feladni: cím hiányzik. Adj meg --title és a kötelező mezőket kézzel a "haszno shop post" paranccsal.\n', 2)
             return
           }
           const ad = await shopClient.myAds.post(body as unknown as Parameters<typeof shopClient.myAds.post>[0])
@@ -1209,13 +1202,12 @@ export function registerShopCommands(
         const chunks: Buffer[] = []
         for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
         const rawText = Buffer.concat(chunks).toString('utf8').trim()
-        if (!rawText) { process.stderr.write('Üres bemenet.\n'); process.exit(2); return }
+        if (!rawText) { failCli('Üres bemenet.\n', 2); return }
         let payload: Record<string, unknown>
         try {
           payload = JSON.parse(rawText) as Record<string, unknown>
         } catch {
-          process.stderr.write('Érvénytelen JSON.\n')
-          process.exit(2)
+          failCli('Érvénytelen JSON.\n', 2)
           return
         }
         const d = await shopClient.draft.save(payload)
@@ -1275,13 +1267,11 @@ export function registerShopCommands(
               try { return statSync(join(source, e)).isDirectory() } catch { return false }
             })
           } catch (err) {
-            process.stderr.write(`Nem sikerült beolvasni a könyvtárat: ${err instanceof Error ? err.message : String(err)}\n`)
-            process.exit(2)
+            failCli(`Nem sikerült beolvasni a könyvtárat: ${err instanceof Error ? err.message : String(err)}\n`, 2)
             return
           }
           if (entries.length === 0) {
-            process.stderr.write('Nincs alkönyvtár a megadott könyvtárban.\n')
-            process.exit(2)
+            failCli('Nincs alkönyvtár a megadott könyvtárban.\n', 2)
             return
           }
           // Build placeholder rows for each subdirectory (actual data from AI)
@@ -1301,14 +1291,12 @@ export function registerShopCommands(
           try {
             csvText = readFileSync(source, 'utf8')
           } catch (err) {
-            process.stderr.write(`Nem sikerült beolvasni a CSV fájlt: ${err instanceof Error ? err.message : String(err)}\n`)
-            process.exit(2)
+            failCli(`Nem sikerült beolvasni a CSV fájlt: ${err instanceof Error ? err.message : String(err)}\n`, 2)
             return
           }
           const lines = csvText.split('\n').map((l) => l.trim()).filter(Boolean)
           if (lines.length < 2) {
-            process.stderr.write('A CSV fájl üres vagy csak fejlécet tartalmaz.\n')
-            process.exit(2)
+            failCli('A CSV fájl üres vagy csak fejlécet tartalmaz.\n', 2)
             return
           }
           const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase().replace(/-/g, '_'))
@@ -1532,8 +1520,7 @@ export function registerShopCommands(
       if (opts.displayName !== undefined) body.displayName = opts.displayName
 
       if (Object.keys(body).length === 0) {
-        process.stderr.write('Legalább egy opciót adj meg: --display-name\n')
-        process.exit(2)
+        failCli('Legalább egy opciót adj meg: --display-name\n', 2)
         return
       }
       try {
@@ -1577,20 +1564,17 @@ export function registerShopCommands(
     .action(async (adIdStr: string, opts: { markupPct: string; markupFt: string }, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
       if (isNaN(adId) || adId <= 0) {
-        process.stderr.write('Érvénytelen hirdetés-azonosító.\n')
-        process.exit(2)
+        failCli('Érvénytelen hirdetés-azonosító.\n', 2)
         return
       }
       const markupPct = parseFloat(opts.markupPct)
       if (isNaN(markupPct) || markupPct < 0) {
-        process.stderr.write('Érvénytelen felár: nem negatív számot adj meg.\n')
-        process.exit(2)
+        failCli('Érvénytelen felár: nem negatív számot adj meg.\n', 2)
         return
       }
       const markupFt = parseInt(opts.markupFt, 10)
       if (isNaN(markupFt) || markupFt < 0 || markupFt > 50_000_000) {
-        process.stderr.write('Érvénytelen fix felár: 0 és 50 000 000 közötti egész számot adj meg.\n')
-        process.exit(2)
+        failCli('Érvénytelen fix felár: 0 és 50 000 000 közötti egész számot adj meg.\n', 2)
         return
       }
       try {
@@ -1606,8 +1590,7 @@ export function registerShopCommands(
     .action(async (adIdStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const adId = parseInt(adIdStr, 10)
       if (isNaN(adId) || adId <= 0) {
-        process.stderr.write('Érvénytelen hirdetés-azonosító.\n')
-        process.exit(2)
+        failCli('Érvénytelen hirdetés-azonosító.\n', 2)
         return
       }
       try {
@@ -1655,13 +1638,11 @@ export function registerShopCommands(
     .action(async (idStr: string, opts: { message: string }, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id) || id <= 0) {
-        process.stderr.write('Érvénytelen moderáció-azonosító.\n')
-        process.exit(2)
+        failCli('Érvénytelen moderáció-azonosító.\n', 2)
         return
       }
       if (opts.message.length < 10) {
-        process.stderr.write('Az üzenet legalább 10 karakter kell legyen.\n')
-        process.exit(2)
+        failCli('Az üzenet legalább 10 karakter kell legyen.\n', 2)
         return
       }
       try {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   HasznoApiError,
+  buildAuthHeader,
   del,
   get,
   isShopToken,
@@ -9,7 +10,7 @@ import {
   put,
   request,
   setCurrentCommandPath
-} from "./chunk-35LUSKOJ.js";
+} from "./chunk-U6YS466B.js";
 import {
   CONFIG_PATH,
   DEFAULT_API_URL,
@@ -385,6 +386,56 @@ function createLegacyClient(opts) {
   };
 }
 
+// src/client/cli-error.ts
+var jsonMode = () => false;
+var redactions = [];
+function configureCliErrors(isJson2, secrets) {
+  jsonMode = isJson2;
+  redactions = secrets.filter((s) => Boolean(s)).sort((a, b) => b.length - a.length);
+}
+function redact(value) {
+  for (const secret of redactions) value = value.replaceAll(secret, "[kitakarva]");
+  return value.replace(/\bhaszno_(?:live|test|oa)_[A-Za-z0-9_-]+\b/g, "[kitakarva]");
+}
+function apiHint(status, code) {
+  if (status === 401 || code === "unauthenticated") return "Futtasd: haszno login";
+  if (status === 403 || code === "forbidden") return "Ellen\u0151rizd a token hat\xF3k\xF6r\xE9t (read/write) \xE9s a bolt-token korl\xE1toz\xE1sait.";
+  if (status === 404 || code === "not_found") return "Ellen\u0151rizd az azonos\xEDt\xF3t.";
+  if (status === 409 || code === "conflict") return "Ism\xE9telt nonce: k\xE9rj \xFAj azonos\xEDt\xF3t (randomUUID), vagy keresd a GET list\xE1ban az eredeti bejegyz\xE9st.";
+  if (status === 422 || code === "unprocessable") return "Ellen\u0151rizd az \xE1rszintet: a javasolt \xE1r nem lehet az \xE1r-minimum alatt.";
+  if (status === 429 || code === "rate_limited") return "T\xFAl sok k\xE9r\xE9s \u2014 v\xE1rj egy percet \xE9s pr\xF3b\xE1ld \xFAjra.";
+}
+function writeCliError(err, { json = jsonMode(), code, human } = {}) {
+  const message = redact(err instanceof Error ? err.message : String(err)).trim();
+  const api = err instanceof HasznoApiError ? err : void 0;
+  const apiCode = typeof api?.code === "string" ? redact(api.code) : void 0;
+  const requestId = typeof api?.requestId === "string" ? redact(api.requestId) : void 0;
+  const hint = api && apiHint(api.status, apiCode);
+  if (json) {
+    process.stderr.write(JSON.stringify({
+      error: message,
+      code: apiCode || code || "command_failed",
+      status: api?.status,
+      requestId,
+      hint
+    }) + "\n");
+    return;
+  }
+  let text = human === void 0 ? message.startsWith("Hiba:") ? message : `Hiba: ${message}` : redact(human).trimEnd();
+  if (api) {
+    text += ` (HTTP ${api.status})`;
+    if (apiCode) text += `  [code: ${apiCode}]`;
+    if (requestId) text += `  [requestId: ${requestId}]`;
+  }
+  process.stderr.write(text + "\n");
+  if (hint) process.stderr.write(`  \u2192 ${hint}
+`);
+}
+function failCli(err, exitCode = 1, options) {
+  writeCliError(err, { code: exitCode === 2 ? "invalid_input" : void 0, ...options });
+  process.exit(exitCode);
+}
+
 // src/commands/catalog.ts
 function registerCatalogCommands(_program, _client) {
 }
@@ -465,7 +516,7 @@ async function cmdShow(client2, id, opts) {
   const products = await client2.products.list({ all: true });
   const p = products.find((x) => x.id === id);
   if (!p) {
-    console.error(`Nem tal\xE1lhat\xF3 term\xE9k: ${id}`);
+    writeCliError(`Nem tal\xE1lhat\xF3 term\xE9k: ${id}`);
     process.exitCode = 1;
     return;
   }
@@ -493,7 +544,7 @@ async function cmdUpdate(client2, id, opts) {
   if (opts.marketShop !== void 0) body.marketShop = opts.marketShop === "null" ? null : opts.marketShop;
   if (opts.price !== void 0) body.priceGross = Number(opts.price);
   if (Object.keys(body).length === 0) {
-    console.error("Legal\xE1bb egy mez\u0151t meg kell adni: --market-min, --market-shop vagy --price");
+    writeCliError("Legal\xE1bb egy mez\u0151t meg kell adni: --market-min, --market-shop vagy --price", { code: "invalid_input" });
     process.exitCode = 2;
     return;
   }
@@ -517,7 +568,7 @@ async function cmdUpdate(client2, id, opts) {
 }
 async function cmdListing(client2, id, opts) {
   if (!opts.on && !opts.off) {
-    console.error("Add meg: --on (list\xE1z) vagy --off (levesz a list\xE1r\xF3l)");
+    writeCliError("Add meg: --on (list\xE1z) vagy --off (levesz a list\xE1r\xF3l)", { code: "invalid_input" });
     process.exitCode = 2;
     return;
   }
@@ -600,12 +651,7 @@ async function cmdImpact(client2, opts) {
   console.log(`Auto-tov\xE1bb\xEDtott:     ${impact.autoForwardedOrders}`);
 }
 function handleError(err) {
-  if (err instanceof Error) {
-    console.error("Hiba:", err.message);
-  } else {
-    console.error("Ismeretlen hiba:", String(err));
-  }
-  process.exit(1);
+  return failCli(err);
 }
 function registerProductsCommands(program2, client2) {
   const products = program2.command("products").description("Saj\xE1t bolt term\xE9kei \xE9s \xE1raz\xE1s");
@@ -709,9 +755,7 @@ function parseIds(raw) {
   });
 }
 function die(msg, code = 1) {
-  process.stderr.write(`Hiba: ${msg}
-`);
-  process.exit(code);
+  return failCli(msg, code);
 }
 function registerProposalsCommands(program2, client2) {
   const proposals = program2.command("proposals").description("\xC1raz\xE1si javaslatok kezel\xE9se (price proposals)");
@@ -914,9 +958,7 @@ function fmtBool(v) {
   return v ? "igen" : "nem";
 }
 function die2(msg, code = 1) {
-  process.stderr.write(`Hiba: ${msg}
-`);
-  process.exit(code);
+  return failCli(msg, code);
 }
 function padR(s, w) {
   return s.length >= w ? s.slice(0, w) : s + " ".repeat(w - s.length);
@@ -1428,15 +1470,13 @@ function registerOrdersCommands(program2, client2) {
     `Sz\u0171r\xE9s \xE1llapotra (${VALID_STATUSES.join(", ")})`
   ).action(async (opts, cmd) => {
     if (opts.status && !VALID_STATUSES.includes(opts.status)) {
-      console.error(`Hiba: \xE9rv\xE9nytelen \xE1llapot "${opts.status}". Lehets\xE9ges \xE9rt\xE9kek: ${VALID_STATUSES.join(", ")}`);
-      process.exit(2);
+      failCli(`Hiba: \xE9rv\xE9nytelen \xE1llapot "${opts.status}". Lehets\xE9ges \xE9rt\xE9kek: ${VALID_STATUSES.join(", ")}`, 2);
     }
     let list;
     try {
       list = await client2.orders.list();
     } catch (err) {
-      console.error("API hiba:", err instanceof Error ? err.message : String(err));
-      process.exit(1);
+      failCli(err);
     }
     if (opts.status) {
       list = list.filter((o) => o.status === opts.status);
@@ -1450,20 +1490,17 @@ function registerOrdersCommands(program2, client2) {
   orders.command("show <id>").description("Egy rendel\xE9s r\xE9szletes adatai t\xE9telekkel \xE9s esem\xE9nynapl\xF3val").action(async (idStr, _opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id) || id <= 0) {
-      console.error("Hiba: az <id> eg\xE9sz sz\xE1m kell legyen.");
-      process.exit(2);
+      failCli("Hiba: az <id> eg\xE9sz sz\xE1m kell legyen.", 2);
     }
     let list;
     try {
       list = await client2.orders.list();
     } catch (err) {
-      console.error("API hiba:", err instanceof Error ? err.message : String(err));
-      process.exit(1);
+      failCli(err);
     }
     const order = list.find((o) => o.id === id);
     if (!order) {
-      console.error(`Hiba: a #${id} rendel\xE9s nem tal\xE1lhat\xF3.`);
-      process.exit(1);
+      failCli(`Hiba: a #${id} rendel\xE9s nem tal\xE1lhat\xF3.`, 1);
     }
     if (isJsonMode3(cmd)) {
       process.stdout.write(JSON.stringify(order, null, 2) + "\n");
@@ -1474,8 +1511,7 @@ function registerOrdersCommands(program2, client2) {
   orders.command("ship <id>").description("Rendel\xE9s megjel\xF6l\xE9se sz\xE1ll\xEDtottk\xE9nt (\xEDr\xE1s \u2014 sz\xFCks\xE9ges: --yes)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id) || id <= 0) {
-      console.error("Hiba: az <id> eg\xE9sz sz\xE1m kell legyen.");
-      process.exit(2);
+      failCli("Hiba: az <id> eg\xE9sz sz\xE1m kell legyen.", 2);
     }
     if (!opts.yes) {
       const ok = await interactiveConfirm(`Biztosan sz\xE1ll\xEDtottk\xE9nt jel\xF6led a #${id} rendel\xE9st?`);
@@ -1488,8 +1524,7 @@ function registerOrdersCommands(program2, client2) {
     try {
       updated = await client2.orders.ship(id);
     } catch (err) {
-      console.error("API hiba:", err instanceof Error ? err.message : String(err));
-      process.exit(1);
+      failCli(err);
     }
     if (isJsonMode3(cmd)) {
       process.stdout.write(JSON.stringify(updated, null, 2) + "\n");
@@ -1509,8 +1544,7 @@ function registerOrdersCommands(program2, client2) {
     try {
       result = await client2.orders.createDemo();
     } catch (err) {
-      console.error("API hiba:", err instanceof Error ? err.message : String(err));
-      process.exit(1);
+      failCli(err);
     }
     if (isJsonMode3(cmd)) {
       process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -1560,19 +1594,12 @@ function buildListCommand(rootProgram, client2) {
     try {
       recs = await client2.recommendations.get();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (json) {
-        console.error(JSON.stringify({ error: msg }));
-      } else {
-        console.error(`Hiba a javaslatok lek\xE9r\xE9sekor: ${msg}`);
-      }
-      process.exit(1);
+      failCli(err, 1, { json });
     }
     let items = recs.items ?? [];
     if (opts.minScore != null) {
       if (isNaN(opts.minScore) || opts.minScore < 0 || opts.minScore > 100) {
-        console.error("Hiba: --min-score 0 \xE9s 100 k\xF6z\xF6tti sz\xE1m legyen.");
-        process.exit(2);
+        failCli("Hiba: --min-score 0 \xE9s 100 k\xF6z\xF6tti sz\xE1m legyen.", 2);
       }
       items = items.filter((it) => (it.trendScore ?? 0) >= opts.minScore);
     }
@@ -1587,8 +1614,7 @@ function buildListCommand(rootProgram, client2) {
     });
     if (opts.limit != null) {
       if (isNaN(opts.limit) || opts.limit < 1) {
-        console.error("Hiba: --limit legal\xE1bb 1 legyen.");
-        process.exit(2);
+        failCli("Hiba: --limit legal\xE1bb 1 legyen.", 2);
       }
       items = items.slice(0, opts.limit);
     }
@@ -1648,7 +1674,7 @@ function buildFillKeywordsCommand(rootProgram, client2) {
     if (!confirmed) {
       const msg = "Megszak\xEDtva. Haszn\xE1ld a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.";
       if (json) {
-        console.error(JSON.stringify({ error: msg, hint: "pass --yes to confirm" }));
+        writeCliError(msg, { json, code: "confirmation_required" });
       } else {
         console.log(msg);
       }
@@ -1658,13 +1684,7 @@ function buildFillKeywordsCommand(rootProgram, client2) {
     try {
       result = await client2.recommendations.fillTrendKeywords();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (json) {
-        console.error(JSON.stringify({ error: msg }));
-      } else {
-        console.error(`Hiba a kulcssz\xF3friss\xEDt\xE9s sor\xE1n: ${msg}`);
-      }
-      process.exit(1);
+      failCli(err, 1, { json });
     }
     if (json) {
       console.log(JSON.stringify({ updated: result.updated }));
@@ -1718,9 +1738,7 @@ async function askConfirm2(question) {
 async function requireConfirm(yes, message) {
   if (yes) return true;
   if (!process.stdin.isTTY) {
-    console.error(
-      "Hiba: \xEDr\xE1si m\u0171velethez add meg a --yes kapcsol\xF3t nem-interakt\xEDv m\xF3dban."
-    );
+    writeCliError("\xCDr\xE1si m\u0171velethez add meg a --yes kapcsol\xF3t nem-interakt\xEDv m\xF3dban.", { code: "confirmation_required" });
     process.exit(2);
     return false;
   }
@@ -1729,8 +1747,7 @@ async function requireConfirm(yes, message) {
   return ok;
 }
 function exitWithError(err) {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`Hiba: ${msg}`);
+  writeCliError(err);
   process.exit(1);
 }
 function printFeedImportResult(result, json) {
@@ -2105,6 +2122,129 @@ function createShopClient(opts) {
   };
 }
 
+// src/client/mcp.ts
+var McpToolError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "McpToolError";
+  }
+};
+function parseRpcBody(text) {
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
+  const data = text.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).pop();
+  if (!data) throw new Error("A Haszno MCP szerver \xFCres v\xE1laszt adott.");
+  return JSON.parse(data);
+}
+async function callMcpTool(name, args, opts = {}) {
+  const conn = resolveConnection(opts, process.env, opts.readConfig);
+  if (!isShopToken(conn.apiKey)) {
+    throw new Error("Ehhez bolt-kulcs (haszno_\u2026) kell: `haszno configure --api-key <kulcs>` vagy HASZNO_API_TOKEN.");
+  }
+  const fetchFn = opts.fetch ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 6e4);
+  let response;
+  try {
+    response = await fetchFn(`${conn.baseUrl}/api/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${conn.apiKey}`
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+      signal: controller.signal,
+      redirect: "manual"
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new HasznoApiError(
+      response.status,
+      "A kulcsot a szerver elutas\xEDtotta. Ellen\u0151rizd: haszno account doctor",
+      response.status === 401 ? "unauthenticated" : "forbidden",
+      response.headers.get("x-request-id") ?? void 0
+    );
+  }
+  if (!response.ok) throw new HasznoApiError(
+    response.status,
+    "A Haszno MCP szerver hib\xE1t adott.",
+    response.status === 429 ? "rate_limited" : "mcp_http_error",
+    response.headers.get("x-request-id") ?? void 0
+  );
+  const answer = parseRpcBody(await response.text());
+  if (answer.error) throw new McpToolError(answer.error.message ?? "Ismeretlen hiba");
+  const text = (answer.result?.content ?? []).map((part) => part.text ?? "").join("\n");
+  if (answer.result?.isError) throw new McpToolError(text || "Ismeretlen hiba");
+  return text;
+}
+
+// src/client/doctor.ts
+async function checkDoctor(opts) {
+  const conn = resolveConnection(opts, process.env, opts.readConfig);
+  const isShop = isShopToken(conn.apiKey);
+  const credentialMode = isShop ? "shop-token (Bearer)" : conn.apiKey ? "api-key (x-api-key)" : conn.basicAuth ? "Basic" : "nincs hiteles\xEDt\xE9s";
+  const hasCredentials = Boolean(conn.apiKey || conn.basicAuth);
+  const fetchFn = opts.fetch ?? fetch;
+  async function probe(path, init, read) {
+    let response;
+    const signal = AbortSignal.timeout(opts.timeoutMs ?? 8e3);
+    try {
+      response = await fetchFn(conn.baseUrl + path, { ...init, redirect: "manual", signal });
+    } catch {
+      return { status: signal.aborted ? "timeout" : "unreachable" };
+    }
+    const httpStatus = response.status;
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {
+      });
+      return { status: httpStatus === 401 ? "unauthenticated" : httpStatus === 403 ? "forbidden" : httpStatus === 429 ? "rate_limited" : "http_error", httpStatus };
+    }
+    try {
+      return { status: await read(response) ? "ok" : "invalid_response", httpStatus };
+    } catch {
+      return { status: signal.aborted ? "timeout" : "invalid_response", httpStatus };
+    }
+  }
+  const headers = { Accept: "application/json", ...buildAuthHeader(conn) };
+  let me = {};
+  const [api, authCheck] = await Promise.all([
+    probe("/api/health", { headers: { Accept: "application/json" } }, async (response) => (await response.json())?.ok === true),
+    hasCredentials ? probe("/api/v1/auth/me", { headers }, async (response) => {
+      const user = await response.json();
+      if (!user || typeof user.name !== "string" && typeof user.shopId !== "number") return false;
+      me = {
+        email: typeof user.email === "string" ? user.email : void 0,
+        name: typeof user.name === "string" ? user.name : void 0,
+        shopName: typeof user.shopName === "string" ? user.shopName : void 0,
+        shopId: typeof user.shopId === "number" ? user.shopId : void 0,
+        tokenScope: user.tokenScope === "read" || user.tokenScope === "write" ? user.tokenScope : void 0
+      };
+      return true;
+    }) : Promise.resolve({ status: "missing" })
+  ]);
+  let mcp = { status: "skipped" };
+  if (isShop && authCheck.status === "ok") {
+    mcp = await probe("/api/mcp", {
+      method: "POST",
+      headers: { ...headers, Accept: "application/json, text/event-stream", "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "haszno-cli-doctor", version: "1" }
+      } })
+    }, async (response) => {
+      const answer = parseRpcBody(await response.text());
+      return answer?.jsonrpc === "2.0" && answer.id === 1 && !answer.error && typeof answer.result?.protocolVersion === "string";
+    });
+  }
+  const apiOk = authCheck.status === "ok";
+  const apiError = apiOk ? null : authCheck.status === "missing" ? "Nincs bejelentkezve" : authCheck.httpStatus ? `HTTP ${authCheck.httpStatus} (${authCheck.status})` : authCheck.status;
+  return { isShop, credentialMode, apiOk, apiError, me, api, auth: { ...authCheck, scope: me.tokenScope ?? null }, mcp };
+}
+
 // src/commands/account.ts
 function writeConfigFile(config, configPath = CONFIG_PATH) {
   const dir = dirname(configPath);
@@ -2128,32 +2268,8 @@ function printKv(rows) {
 `);
   }
 }
-function nextStepHint(status, code) {
-  if (status === 401 || code === "unauthenticated") return "Futtasd: haszno login";
-  if (status === 403 || code === "forbidden") return "Ellen\u0151rizd a token hat\xF3k\xF6r\xE9t (read/write) \xE9s a bolt-token korl\xE1toz\xE1sait.";
-  if (status === 404 || code === "not_found") return "Ellen\u0151rizd az azonos\xEDt\xF3t.";
-  if (status === 409 || code === "conflict") return "Ism\xE9telt nonce: k\xE9rj \xFAj azonos\xEDt\xF3t (randomUUID), vagy keresd a GET list\xE1ban az eredeti bejegyz\xE9st.";
-  if (status === 422 || code === "unprocessable") return "Ellen\u0151rizd az \xE1rszintet: a javasolt \xE1r nem lehet az \xE1r-minimum alatt.";
-  if (status === 429 || code === "rate_limited") return "T\xFAl sok k\xE9r\xE9s \u2014 v\xE1rj egy percet \xE9s pr\xF3b\xE1ld \xFAjra.";
-  return void 0;
-}
 function handleError2(err) {
-  if (err instanceof HasznoApiError) {
-    let msg = `Hiba: ${err.message} (HTTP ${err.status})`;
-    if (err.code) msg += `  [code: ${err.code}]`;
-    if (err.requestId) msg += `  [requestId: ${err.requestId}]`;
-    process.stderr.write(msg + "\n");
-    const hint = nextStepHint(err.status, err.code);
-    if (hint) process.stderr.write(`  \u2192 ${hint}
-`);
-  } else if (err instanceof Error) {
-    process.stderr.write(`Hiba: ${err.message}
-`);
-  } else {
-    process.stderr.write(`Hiba: ${String(err)}
-`);
-  }
-  process.exit(1);
+  return failCli(err);
 }
 async function askConfirm3(message) {
   if (!process.stdin.isTTY) return false;
@@ -2219,10 +2335,11 @@ function registerAccountCommands(program2, client2, { configPath = CONFIG_PATH, 
       let password = process.env["HASZNO_PASSWORD"] ?? "";
       if (!email || !password) {
         if (!process.stdin.isTTY) {
-          process.stderr.write(
-            "Interakt\xEDv m\xF3d TTY n\xE9lk\xFCl nem el\xE9rhet\u0151. \xC1ll\xEDtsd be a HASZNO_EMAIL \xE9s HASZNO_PASSWORD v\xE1ltoz\xF3kat.\n"
+          failCli(
+            "Interakt\xEDv m\xF3d TTY n\xE9lk\xFCl nem el\xE9rhet\u0151. \xC1ll\xEDtsd be a HASZNO_EMAIL \xE9s HASZNO_PASSWORD v\xE1ltoz\xF3kat.",
+            2,
+            { code: "credentials_required" }
           );
-          process.exit(2);
           return;
         }
         process.stdout.write("Haszno bejelentkez\xE9s\n");
@@ -2264,12 +2381,12 @@ Token elmentve: ${configPath}
   );
   program2.command("logout").description("API-token visszavon\xE1sa \xE9s t\xF6rl\xE9se a konfigur\xE1ci\xF3s f\xE1jlb\xF3l").action(async (_opts, _cmd) => {
     const existing = { ...readConfigObject(configPath) };
-    const apiKey = existing["apiKey"];
-    if (apiKey && apiKey.startsWith("haszno_")) {
+    const apiKey2 = existing["apiKey"];
+    if (apiKey2 && apiKey2.startsWith("haszno_")) {
       const apiUrl = existing["apiUrl"] ?? "https://haszno.com";
       try {
-        const revokeOpts = { ...httpOpts, baseUrl: apiUrl, apiKey };
-        const { post: httpPost } = await import("./http-NCHO5KLD.js");
+        const revokeOpts = { ...httpOpts, baseUrl: apiUrl, apiKey: apiKey2 };
+        const { post: httpPost } = await import("./http-QISVOT6B.js");
         await httpPost("/api/v1/auth/tokens/revoke-current", {}, revokeOpts);
         process.stdout.write("Token visszavonva a szerveren.\n");
       } catch {
@@ -2286,16 +2403,16 @@ Token elmentve: ${configPath}
   });
   program2.command("whoami").description("Aktu\xE1lis felhaszn\xE1l\xF3 \xE9s bejelentkez\xE9si \xE1llapot").action(async (_opts, cmd) => {
     const cfg = readConfigObject(configPath);
-    const apiKey = cfg["apiKey"];
+    const apiKey2 = cfg["apiKey"];
     const userEmail = cfg["userEmail"];
     const userName = cfg["userName"];
     const shopName = cfg["shopName"];
     const apiUrl = cfg["apiUrl"] ?? "https://haszno.com";
-    const data = { userEmail, userName, shopName, apiUrl, authenticated: !!apiKey };
+    const data = { userEmail, userName, shopName, apiUrl, authenticated: !!apiKey2 };
     if (getJsonFlag(cmd)) {
       printJson3(data);
     } else {
-      if (!apiKey) {
+      if (!apiKey2) {
         process.stdout.write("Nincs mentett token. Futtasd: haszno login\n");
         return;
       }
@@ -2307,20 +2424,20 @@ Token elmentve: ${configPath}
 `);
       process.stdout.write(`API URL:     ${apiUrl}
 `);
-      process.stdout.write(`Token:       ${apiKey.slice(0, 12)}...
+      process.stdout.write(`Token:       ${apiKey2.slice(0, 12)}...
 `);
     }
   });
   const configureAction = async (opts, cmd) => {
     const globals = cmd?.optsWithGlobals() ?? {};
     let apiUrl = opts.apiUrl ?? globals.apiUrl;
-    let apiKey = opts.apiKey ?? globals.apiKey;
-    if (!apiUrl && !apiKey) {
+    let apiKey2 = opts.apiKey ?? globals.apiKey;
+    if (!apiUrl && !apiKey2) {
       if (!process.stdin.isTTY) {
-        process.stderr.write(
-          "Interakt\xEDv m\xF3d TTY n\xE9lk\xFCl nem el\xE9rhet\u0151. Adj meg --api-url \xE9s/vagy --api-key param\xE9tert.\n"
+        failCli(
+          "Interakt\xEDv m\xF3d TTY n\xE9lk\xFCl nem el\xE9rhet\u0151. Adj meg --api-url \xE9s/vagy --api-key param\xE9tert.",
+          2
         );
-        process.exit(2);
         return;
       }
       process.stdout.write("Haszno CLI konfigur\xE1ci\xF3\n");
@@ -2328,11 +2445,11 @@ Token elmentve: ${configPath}
 
 `);
       apiUrl = await askInput("API URL (Enter = alap\xE9rtelmezett https://haszno.com): ");
-      apiKey = await askInput("API kulcs: ");
+      apiKey2 = await askInput("API kulcs: ");
     }
     const updated = { ...readConfigFile(configPath), ...readConfigObject(configPath) };
     if (apiUrl) updated.apiUrl = apiUrl;
-    if (apiKey) updated.apiKey = apiKey;
+    if (apiKey2) updated.apiKey = apiKey2;
     writeConfigFile(updated, configPath);
     process.stdout.write(`Konfigur\xE1ci\xF3s f\xE1jl elmentve: ${configPath}
 `);
@@ -2357,12 +2474,12 @@ Token elmentve: ${configPath}
   });
   account.command("whoami").description("Azonos\xEDt\xE1s \xF6sszefoglal\xF3ja \u2014 bolt-tokennel /api/v1/auth/me-t h\xEDv, egy\xE9b hiteles\xEDt\xE9sn\xE9l az API be\xE1ll\xEDt\xE1sait k\xE9ri le").action(async (_opts, cmd) => {
     const { resolveConnection: resolveConnection2 } = await import("./config-QM7YIT3B.js");
-    const { isShopToken: isShopToken2 } = await import("./http-NCHO5KLD.js");
-    const conn = resolveConnection2(httpOpts, process.env);
+    const { isShopToken: isShopToken2 } = await import("./http-QISVOT6B.js");
+    const conn = resolveConnection2(httpOpts, process.env, httpOpts.readConfig);
     const isShop = isShopToken2(conn.apiKey);
     try {
       if (isShop) {
-        const { get: httpGet } = await import("./http-NCHO5KLD.js");
+        const { get: httpGet } = await import("./http-QISVOT6B.js");
         const me = await httpGet("/api/v1/auth/me", httpOpts);
         if (getJsonFlag(cmd)) {
           printJson3(me);
@@ -2427,8 +2544,7 @@ Token elmentve: ${configPath}
   account.command("impact").description("Haszon-mero / profit impact metrics").option("--days <n>", "Visszatekintesi napok szama", "30").action(async (opts, cmd) => {
     const days = parseInt(opts.days, 10);
     if (isNaN(days) || days < 1) {
-      process.stderr.write("Ervenytelen --days ertek; pozitiv egesz szamot adj meg.\n");
-      process.exit(2);
+      failCli("Ervenytelen --days ertek; pozitiv egesz szamot adj meg.", 2);
       return;
     }
     try {
@@ -2495,26 +2611,19 @@ Token elmentve: ${configPath}
   });
   settingsCmd.command("update").description("Arazasi beallitasok frissitese (irasi muvelet)").option("--undercut-pct <n>", "Alac\u0131nzasi szazalek (pl. 2 = 2%-kal ar ala)").option("--min-margin-pct <n>", "Minimalis haszon % (pl. 10)").option("--vat-pct <n>", "AFA % (pl. 27)").option("--yes", "Megerosites keres nelkul / skip confirmation").action(async (opts, cmd) => {
     if (!opts.undercutPct && !opts.minMarginPct && !opts.vatPct) {
-      process.stderr.write(
-        "Legalabb egy opci\xF3t adj meg: --undercut-pct, --min-margin-pct, --vat-pct\n"
-      );
-      process.exit(2);
+      failCli("Legalabb egy opci\xF3t adj meg: --undercut-pct, --min-margin-pct, --vat-pct", 2);
       return;
     }
     const undercutPct = opts.undercutPct !== void 0 ? parseFloat(opts.undercutPct) : void 0;
     const minMarginPct = opts.minMarginPct !== void 0 ? parseFloat(opts.minMarginPct) : void 0;
     const vatPct = opts.vatPct !== void 0 ? parseFloat(opts.vatPct) : void 0;
     if (undercutPct !== void 0 && (isNaN(undercutPct) || undercutPct < 0) || minMarginPct !== void 0 && (isNaN(minMarginPct) || minMarginPct < 0) || vatPct !== void 0 && (isNaN(vatPct) || vatPct < 0)) {
-      process.stderr.write(
-        "Ervenytelen szam; az ertekeknek nem negativ szamoknak kell lenniuk.\n"
-      );
-      process.exit(2);
+      failCli("Ervenytelen szam; az ertekeknek nem negativ szamoknak kell lenniuk.", 2);
       return;
     }
     if (!opts.yes) {
       if (!process.stdin.isTTY) {
-        process.stderr.write("Irasi muvelethez --yes szukseges nem-interaktiv modban.\n");
-        process.exit(2);
+        failCli("Irasi muvelethez --yes szukseges nem-interaktiv modban.", 2, { code: "confirmation_required" });
         return;
       }
       const ok = await askConfirm3("Biztosan frissited az arazasi beallitasokat?");
@@ -2548,7 +2657,7 @@ Token elmentve: ${configPath}
   });
   account.command("me").description("Azonos\xEDt\xE1si adatok lek\xE9r\xE9se a szerverr\u0151l (GET /api/v1/auth/me) \u2014 bolt-token \xE9s egy\xE9b hiteles\xEDt\xE9si m\xF3dokkal egyar\xE1nt m\u0171k\xF6dik").action(async (_opts, cmd) => {
     try {
-      const { get: httpGet } = await import("./http-NCHO5KLD.js");
+      const { get: httpGet } = await import("./http-QISVOT6B.js");
       const me = await httpGet("/api/v1/auth/me", httpOpts);
       if (getJsonFlag(cmd)) {
         printJson3(me);
@@ -2568,29 +2677,13 @@ Token elmentve: ${configPath}
       handleError2(err);
     }
   });
-  account.command("doctor").description("Hiteles\xEDt\xE9si m\xF3d, token hat\xF3k\xF6r \xE9s el\xE9rhet\u0151 parancsok ellen\u0151rz\xE9se").action(async (_opts, cmd) => {
-    const { resolveConnection: resolveConnection2 } = await import("./config-QM7YIT3B.js");
-    const { isShopToken: isShopToken2 } = await import("./http-NCHO5KLD.js");
-    const conn = resolveConnection2(httpOpts, process.env);
-    const isShop = isShopToken2(conn.apiKey);
-    const credentialMode = isShop ? "shop-token (Bearer)" : conn.apiKey ? "api-key (x-api-key)" : conn.basicAuth ? "Basic" : "nincs hiteles\xEDt\xE9s";
-    let apiOk = false;
-    let me = {};
-    let apiError;
-    try {
-      const { get: httpGet } = await import("./http-NCHO5KLD.js");
-      me = await httpGet("/api/v1/auth/me", httpOpts);
-      apiOk = true;
-    } catch (err) {
-      apiError = err instanceof Error ? err.message : String(err);
-    }
+  account.command("doctor").description("API-kapcsolat, hiteles\xEDt\xE9s, token hat\xF3k\xF6r \xE9s MCP ellen\u0151rz\xE9se").action(async (_opts, cmd) => {
+    const { isShop, ...checks } = await checkDoctor(httpOpts);
+    const { credentialMode, me, api, auth, mcp } = checks;
     const groups = isShop ? ["products (read)", "orders (read)", "proposals list/propose", "shop (scope-gated)", "account me/doctor"] : ["products", "orders", "proposals (all)", "shop", "account", "rules", "feeds", "settings", "catalogue"];
     const blocked = isShop ? ["proposals approve/reject/rollback", "rules", "feeds", "settings", "import-list", "billing"] : [];
     const data = {
-      credentialMode,
-      apiOk,
-      apiError: apiError ?? null,
-      me,
+      ...checks,
       availableCommandGroups: groups,
       blockedForShopToken: blocked
     };
@@ -2599,7 +2692,12 @@ Token elmentve: ${configPath}
     } else {
       process.stdout.write(`Hiteles\xEDt\xE9si m\xF3d: ${credentialMode}
 `);
-      process.stdout.write(`API kapcsolat:   ${apiOk ? "OK" : `HIBA \u2014 ${apiError ?? "ismeretlen"}`}
+      const status = (check) => check.httpStatus ? `${check.status} (HTTP ${check.httpStatus})` : check.status;
+      process.stdout.write(`API kapcsolat:   ${status(api)}
+`);
+      process.stdout.write(`Hiteles\xEDt\xE9s:     ${status(auth)}
+`);
+      process.stdout.write(`MCP kapcsolat:   ${status(mcp)}
 `);
       if (me.name) process.stdout.write(`Felhaszn\xE1l\xF3:     ${me.name}${me.shopName ? ` (${me.shopName})` : ""}
 `);
@@ -2613,7 +2711,7 @@ Token elmentve: ${configPath}
         for (const b of blocked) process.stdout.write(`  \u2717 ${b}
 `);
       }
-      if (!apiOk) {
+      if (auth.status === "missing" || auth.status === "unauthenticated") {
         process.stdout.write("\nTipp: futtasd a `haszno login` parancsot a hiteles\xEDt\xE9s meg\xFAj\xEDt\xE1s\xE1hoz.\n");
       }
     }
@@ -2645,7 +2743,7 @@ Token elmentve: ${configPath}
   const tokens = program2.command("tokens").description("API tokenek kezel\xE9se");
   tokens.command("list").description("Akt\xEDv API tokenek list\xE1ja (session-alap\xFA hiteles\xEDt\xE9s sz\xFCks\xE9ges)").action(async (_opts, cmd) => {
     try {
-      const { get: httpGet } = await import("./http-NCHO5KLD.js");
+      const { get: httpGet } = await import("./http-QISVOT6B.js");
       const items = await httpGet("/api/v1/auth/tokens", httpOpts);
       if (getJsonFlag(cmd)) {
         printJson3(items);
@@ -2669,12 +2767,11 @@ Token elmentve: ${configPath}
   tokens.command("revoke <id>").description("API token visszavon\xE1sa azonos\xEDt\xF3 alapj\xE1n (session-alap\xFA hiteles\xEDt\xE9s sz\xFCks\xE9ges)").action(async (idStr, _opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id) || id <= 0) {
-      process.stderr.write("\xC9rv\xE9nytelen token azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen token azonos\xEDt\xF3.", 2);
       return;
     }
     try {
-      const { del: httpDel } = await import("./http-NCHO5KLD.js");
+      const { del: httpDel } = await import("./http-QISVOT6B.js");
       const result = await httpDel(`/api/v1/auth/tokens/${id}`, httpOpts);
       if (getJsonFlag(cmd)) printJson3(result);
       else process.stdout.write(`Token #${id} visszavonva.
@@ -2816,8 +2913,7 @@ Tal\xE1latok: ${result.total} term\xE9k (${result.items.length} megjelen\xEDtve)
         }
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
   const importCmd = program2.command("import").description("Import lista kezel\xE9se");
@@ -2837,8 +2933,7 @@ Import lista: ${items.length} t\xE9tel
         printImportListTable(items);
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
   importCmd.command("add <ids...>").description("Term\xE9kek hozz\xE1ad\xE1sa az import list\xE1hoz katal\xF3gus-term\xE9k azonos\xEDt\xF3k alapj\xE1n").action(async (rawIds, _opts, cmd) => {
@@ -2855,8 +2950,7 @@ Import lista: ${items.length} t\xE9tel
         console.log(`Hozz\xE1adva: ${result.added} term\xE9k, kihagyva (m\xE1r list\xE1n): ${result.skipped}`);
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
   importCmd.command("push").description("Import list\xE1s term\xE9kek kik\xFCld\xE9se a bek\xF6t\xF6tt webshopba").requiredOption("--ids <azonos\xEDt\xF3k>", 'Import lista t\xE9tel azonos\xEDt\xF3i vessz\u0151vel, pl. "1,2,3"').option("--target <connectionId>", "C\xE9lbolt kapcsolat azonos\xEDt\xF3ja (haszno connections list)", (v) => parseInt(v, 10)).option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (opts, cmd) => {
@@ -2892,8 +2986,7 @@ Import lista: ${items.length} t\xE9tel
         }
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
   const connections = program2.command("connections").description("Bek\xF6t\xF6tt webshop kapcsolatok");
@@ -2912,8 +3005,7 @@ Bek\xF6t\xF6tt boltok: ${conns.length}
         printConnectionsTable(conns);
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
 }
@@ -2975,8 +3067,7 @@ Megh\xEDv\xF3 l\xE9trehozva:`);
 Add \xE1t a k\xF3dot a partnernek: haszno peers accept ${invite.code} --acceptor <bolt_azonosito> --yes`);
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
   peers.command("list").description("Saj\xE1t megh\xEDv\xF3k list\xE1z\xE1sa").action(async (_opts, cmd) => {
@@ -2991,8 +3082,7 @@ Megh\xEDv\xF3k: ${invites.length}
         printInvitesTable(invites);
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
   peers.command("accept <code>").description("Partner megh\xEDv\xF3 elfogad\xE1sa").requiredOption("--acceptor <shop>", "Az elfogad\xF3 bolt/tenant azonos\xEDt\xF3ja").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (code, opts, cmd) => {
@@ -3014,8 +3104,7 @@ Sikeres partnerkapcsolat!`);
         console.log(`  Partner:   ${link.partner}`);
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
 }
@@ -3080,8 +3169,7 @@ function registerBlogCommands(program2, client2) {
         }
       }
     } catch (e) {
-      console.error("Hiba:", e instanceof Error ? e.message : String(e));
-      process.exit(1);
+      failCli(e);
     }
   });
 }
@@ -3232,9 +3320,7 @@ ${report.summary}
 `);
 }
 function die3(msg, code = 1) {
-  process.stderr.write(`Hiba: ${msg}
-`);
-  process.exit(code);
+  return failCli(msg, code);
 }
 function registerReportCommands(program2, client2) {
   program2.command("report").description("Napi piaci jelent\xE9s megjelen\xEDt\xE9se (alap\xE9rtelmezett: legut\xF3bbi)").option("--day <YYYY-MM-DD>", "Adott nap jelent\xE9se (pl. 2026-11-12)").action(async (opts, cmd) => {
@@ -3313,9 +3399,7 @@ function printPostResult(report) {
   );
 }
 function die4(msg, code = 1) {
-  process.stderr.write(`Hiba: ${msg}
-`);
-  process.exit(code);
+  return failCli(msg, code);
 }
 async function readStdin() {
   return new Promise((resolve, reject) => {
@@ -3496,9 +3580,7 @@ function printActionDetail(action) {
   }
 }
 function die5(msg, code = 1) {
-  process.stderr.write(`Hiba: ${msg}
-`);
-  process.exit(code);
+  return failCli(msg, code);
 }
 var ALLOWED_STATUSES = ["javasolt", "vegrehajtva", "elutasitva", "hiba", "visszavonva"];
 function registerActionsCommands(program2, client2) {
@@ -3685,9 +3767,8 @@ function parseAttrs(pairs) {
   for (const pair of pairs) {
     const eq = pair.indexOf("=");
     if (eq < 1) {
-      process.stderr.write(`\xC9rv\xE9nytelen --attr \xE9rt\xE9k: "${pair}" (form\xE1tum: kulcs=\xE9rt\xE9k)
-`);
-      process.exit(2);
+      failCli(`\xC9rv\xE9nytelen --attr \xE9rt\xE9k: "${pair}" (form\xE1tum: kulcs=\xE9rt\xE9k)
+`, 2);
     }
     result[pair.slice(0, eq)] = pair.slice(eq + 1);
   }
@@ -3745,8 +3826,7 @@ function registerShopCommands(program2, shopClient2, _opts) {
   shop.command("show <id>").description("Hirdet\xE9s r\xE9szletei").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -3869,8 +3949,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
           partnerCommissionPct: opts.commissionPct ? parseFloat(opts.commissionPct) : 0
         };
         if (!body.title) {
-          process.stderr.write("A --title megad\xE1sa k\xF6telez\u0151 (vagy --from-photos az AI-javaslathoz).\n");
-          process.exit(2);
+          failCli("A --title megad\xE1sa k\xF6telez\u0151 (vagy --from-photos az AI-javaslathoz).\n", 2);
           return;
         }
         if (opts.dryRun) {
@@ -3886,9 +3965,8 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
         if (!body.contactName) missing.push("--contact-name");
         if (!body.contactEmail) missing.push("--contact-email");
         if (missing.length > 0) {
-          process.stderr.write(`Hi\xE1nyz\xF3 k\xF6telez\u0151 mez\u0151${missing.length > 1 ? "k" : ""}: ${missing.join(", ")}
-`);
-          process.exit(2);
+          failCli(`Hi\xE1nyz\xF3 k\xF6telez\u0151 mez\u0151${missing.length > 1 ? "k" : ""}: ${missing.join(", ")}
+`, 2);
           return;
         }
         if (!opts.yes) {
@@ -3929,8 +4007,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
     async (idStr, opts, cmd) => {
       const id = parseInt(idStr, 10);
       if (isNaN(id)) {
-        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-        process.exit(2);
+        failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
         return;
       }
       try {
@@ -3965,8 +4042,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("pause <id>").description("Hirdet\xE9s sz\xFCneteltet\xE9se").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -3981,8 +4057,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("activate <id>").description("Hirdet\xE9s aktiv\xE1l\xE1sa").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -3997,8 +4072,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("sold <id>").description("Hirdet\xE9s eladottnak jel\xF6l\xE9se").option("--price <Ft>", "T\xE9nyleges elad\xE1si \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4014,8 +4088,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("renew <id>").description("Hirdet\xE9s meg\xFAj\xEDt\xE1sa").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4030,8 +4103,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("delete <id>").description("Hirdet\xE9s t\xF6rl\xE9se").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4068,23 +4140,19 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("inquire <adId>").description("\xDCzenet k\xFCld\xE9se elad\xF3nak").option("--name <n\xE9v>", "A felad\xF3 neve (k\xF6telez\u0151)").option("--email <email>", "A felad\xF3 e-mail-c\xEDm (k\xF6telez\u0151)").option("--phone <telefon>", "A felad\xF3 telefonsz\xE1ma (opcion\xE1lis)").option("--message <sz\xF6veg>", "\xDCzenet sz\xF6vege (k\xF6telez\u0151)").action(async (adIdStr, opts, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId)) {
-      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n", 2);
       return;
     }
     if (!opts.name) {
-      process.stderr.write("--name megad\xE1sa k\xF6telez\u0151.\n");
-      process.exit(2);
+      failCli("--name megad\xE1sa k\xF6telez\u0151.\n", 2);
       return;
     }
     if (!opts.email) {
-      process.stderr.write("--email megad\xE1sa k\xF6telez\u0151.\n");
-      process.exit(2);
+      failCli("--email megad\xE1sa k\xF6telez\u0151.\n", 2);
       return;
     }
     if (!opts.message) {
-      process.stderr.write("--message megad\xE1sa k\xF6telez\u0151.\n");
-      process.exit(2);
+      failCli("--message megad\xE1sa k\xF6telez\u0151.\n", 2);
       return;
     }
     try {
@@ -4104,8 +4172,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("favorite <adId>").description("Hirdet\xE9s ment\xE9se kedvencekbe").action(async (adIdStr, _opts2, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4120,8 +4187,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("unfavorite <adId>").description("Hirdet\xE9s elt\xE1vol\xEDt\xE1sa kedvencekb\u0151l").action(async (adIdStr, _opts2, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4149,8 +4215,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
     async (adIdStr, opts, cmd) => {
       const adId = parseInt(adIdStr, 10);
       if (isNaN(adId)) {
-        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-        process.exit(2);
+        failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
         return;
       }
       if (!opts.yes) {
@@ -4211,8 +4276,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("accept <id>").description("Foglal\xE1s elfogad\xE1sa (elad\xF3k\xE9nt)").option("--held-until <ISO>", "Hat\xE1rid\u0151 a vev\u0151nek (ISO-8601 d\xE1tum/id\u0151)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4227,8 +4291,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("decline <id>").description("Foglal\xE1s elutas\xEDt\xE1sa (elad\xF3k\xE9nt)").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4243,8 +4306,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("cancel <id>").description("Foglal\xE1s lemond\xE1sa (vev\u0151k\xE9nt)").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4259,8 +4321,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("complete <id>").description("Foglal\xE1s teljes\xEDt\xE9se (elad\xF3k\xE9nt)").option("--price <Ft>", "T\xE9nyleges elad\xE1si \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4276,14 +4337,12 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("counter <id>").description("Ellenaj\xE1nlat k\xFCld\xE9se (elad\xF3k\xE9nt, am\xEDg a foglal\xE1s f\xFCgg\u0151ben van)").requiredOption("--price <Ft>", "Ellenaj\xE1nlott \xE1r (brutt\xF3 Ft)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     const price = parseInt(opts.price, 10);
     if (isNaN(price) || price <= 0) {
-      process.stderr.write("\xC9rv\xE9nytelen \xE1r.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen \xE1r.\n", 2);
       return;
     }
     try {
@@ -4298,8 +4357,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("accept-counter <id>").description("Elad\xF3i ellenaj\xE1nlat elfogad\xE1sa (vev\u0151k\xE9nt)").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4314,8 +4372,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("messages <id>").description("Foglal\xE1s \xFCzenetei").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4340,13 +4397,11 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("message <id>").description("\xDCzenet k\xFCld\xE9se a foglal\xE1son").requiredOption("--text <sz\xF6veg>", "\xDCzenet sz\xF6vege (1\u20132000 karakter)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     if (!opts.text.trim()) {
-      process.stderr.write("--text megad\xE1sa k\xF6telez\u0151.\n");
-      process.exit(2);
+      failCli("--text megad\xE1sa k\xF6telez\u0151.\n", 2);
       return;
     }
     try {
@@ -4361,14 +4416,12 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   reservation.command("review <id>").description("\xC9rt\xE9kel\xE9s lead\xE1sa teljes\xEDtett foglal\xE1sra").requiredOption("--rating <1-5>", "\xC9rt\xE9kel\xE9s (1\u20135 csillag)").option("--comment <sz\xF6veg>", "Sz\xF6veges megjegyz\xE9s (max. 1000 karakter)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     const rating = parseInt(opts.rating, 10);
     if (isNaN(rating) || rating < 1 || rating > 5) {
-      process.stderr.write("--rating \xE9rt\xE9ke 1 \xE9s 5 k\xF6z\xE9 kell essen.\n");
-      process.exit(2);
+      failCli("--rating \xE9rt\xE9ke 1 \xE9s 5 k\xF6z\xE9 kell essen.\n", 2);
       return;
     }
     try {
@@ -4384,13 +4437,11 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   inquiry.command("reply <id>").description("V\xE1lasz k\xFCld\xE9se \xE9rdekl\u0151d\u0151nek (elad\xF3k\xE9nt)").requiredOption("--message <sz\xF6veg>", "V\xE1lasz sz\xF6vege (1\u20132000 karakter)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     if (!opts.message.trim()) {
-      process.stderr.write("--message megad\xE1sa k\xF6telez\u0151.\n");
-      process.exit(2);
+      failCli("--message megad\xE1sa k\xF6telez\u0151.\n", 2);
       return;
     }
     try {
@@ -4455,8 +4506,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   savedSearch.command("remove <id>").description("Mentett keres\xE9s t\xF6rl\xE9se").action(async (idStr, _opts2, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4471,8 +4521,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("watch <adId>").description("Feliratkoz\xE1s \xE1res\xE9s-\xE9rtes\xEDt\u0151re egy hirdet\xE9sn\xE9l").action(async (adIdStr, _opts2, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4487,8 +4536,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
   shop.command("unwatch <adId>").description("Leiratkoz\xE1s \xE1res\xE9s-\xE9rtes\xEDt\u0151r\u0151l").action(async (adIdStr, _opts2, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4556,8 +4604,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
           partnerCommissionPct: 0
         };
         if (!body.title) {
-          process.stderr.write('Nem siker\xFClt automatikusan feladni: c\xEDm hi\xE1nyzik. Adj meg --title \xE9s a k\xF6telez\u0151 mez\u0151ket k\xE9zzel a "haszno shop post" paranccsal.\n');
-          process.exit(2);
+          failCli('Nem siker\xFClt automatikusan feladni: c\xEDm hi\xE1nyzik. Adj meg --title \xE9s a k\xF6telez\u0151 mez\u0151ket k\xE9zzel a "haszno shop post" paranccsal.\n', 2);
           return;
         }
         const ad = await shopClient2.myAds.post(body);
@@ -4594,16 +4641,14 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
       for await (const chunk of process.stdin) chunks.push(chunk);
       const rawText = Buffer.concat(chunks).toString("utf8").trim();
       if (!rawText) {
-        process.stderr.write("\xDCres bemenet.\n");
-        process.exit(2);
+        failCli("\xDCres bemenet.\n", 2);
         return;
       }
       let payload;
       try {
         payload = JSON.parse(rawText);
       } catch {
-        process.stderr.write("\xC9rv\xE9nytelen JSON.\n");
-        process.exit(2);
+        failCli("\xC9rv\xE9nytelen JSON.\n", 2);
         return;
       }
       const d = await shopClient2.draft.save(payload);
@@ -4642,14 +4687,12 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
             }
           });
         } catch (err) {
-          process.stderr.write(`Nem siker\xFClt beolvasni a k\xF6nyvt\xE1rat: ${err instanceof Error ? err.message : String(err)}
-`);
-          process.exit(2);
+          failCli(`Nem siker\xFClt beolvasni a k\xF6nyvt\xE1rat: ${err instanceof Error ? err.message : String(err)}
+`, 2);
           return;
         }
         if (entries.length === 0) {
-          process.stderr.write("Nincs alk\xF6nyvt\xE1r a megadott k\xF6nyvt\xE1rban.\n");
-          process.exit(2);
+          failCli("Nincs alk\xF6nyvt\xE1r a megadott k\xF6nyvt\xE1rban.\n", 2);
           return;
         }
         rows = entries.map((e) => ({
@@ -4667,15 +4710,13 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
         try {
           csvText = readFileSync3(source, "utf8");
         } catch (err) {
-          process.stderr.write(`Nem siker\xFClt beolvasni a CSV f\xE1jlt: ${err instanceof Error ? err.message : String(err)}
-`);
-          process.exit(2);
+          failCli(`Nem siker\xFClt beolvasni a CSV f\xE1jlt: ${err instanceof Error ? err.message : String(err)}
+`, 2);
           return;
         }
         const lines = csvText.split("\n").map((l) => l.trim()).filter(Boolean);
         if (lines.length < 2) {
-          process.stderr.write("A CSV f\xE1jl \xFCres vagy csak fejl\xE9cet tartalmaz.\n");
-          process.exit(2);
+          failCli("A CSV f\xE1jl \xFCres vagy csak fejl\xE9cet tartalmaz.\n", 2);
           return;
         }
         const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/-/g, "_"));
@@ -4879,8 +4920,7 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
     const body = {};
     if (opts.displayName !== void 0) body.displayName = opts.displayName;
     if (Object.keys(body).length === 0) {
-      process.stderr.write("Legal\xE1bb egy opci\xF3t adj meg: --display-name\n");
-      process.exit(2);
+      failCli("Legal\xE1bb egy opci\xF3t adj meg: --display-name\n", 2);
       return;
     }
     try {
@@ -4918,20 +4958,17 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
   partnerSyndications.command("upsert <adId>").description("Szindik\xE1ci\xF3 l\xE9trehoz\xE1sa vagy friss\xEDt\xE9se (PUT /api/v1/shop/partner/syndications/:adId) \u2014 hat\xF3k\xF6r: write, keresked\u0151 elad\xF3i t\xEDpus sz\xFCks\xE9ges").requiredOption("--markup-pct <pct>", "Fel\xE1r sz\xE1zal\xE9ka (pl. 10 = +10%)").requiredOption("--markup-ft <ft>", "Fix fel\xE1r Ft-ban (0\u201350 000 000)").action(async (adIdStr, opts, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId) || adId <= 0) {
-      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n", 2);
       return;
     }
     const markupPct = parseFloat(opts.markupPct);
     if (isNaN(markupPct) || markupPct < 0) {
-      process.stderr.write("\xC9rv\xE9nytelen fel\xE1r: nem negat\xEDv sz\xE1mot adj meg.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen fel\xE1r: nem negat\xEDv sz\xE1mot adj meg.\n", 2);
       return;
     }
     const markupFt = parseInt(opts.markupFt, 10);
     if (isNaN(markupFt) || markupFt < 0 || markupFt > 5e7) {
-      process.stderr.write("\xC9rv\xE9nytelen fix fel\xE1r: 0 \xE9s 50 000 000 k\xF6z\xF6tti eg\xE9sz sz\xE1mot adj meg.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen fix fel\xE1r: 0 \xE9s 50 000 000 k\xF6z\xF6tti eg\xE9sz sz\xE1mot adj meg.\n", 2);
       return;
     }
     try {
@@ -4946,8 +4983,7 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
   partnerSyndications.command("remove <adId>").description("Szindik\xE1ci\xF3 t\xF6rl\xE9se (DELETE /api/v1/shop/partner/syndications/:adId) \u2014 hat\xF3k\xF6r: write").action(async (adIdStr, _opts2, cmd) => {
     const adId = parseInt(adIdStr, 10);
     if (isNaN(adId) || adId <= 0) {
-      process.stderr.write("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen hirdet\xE9s-azonos\xEDt\xF3.\n", 2);
       return;
     }
     try {
@@ -4988,13 +5024,11 @@ K\xE9sz. Feladva: ${posted}/${rows.length} hirdet\xE9s.
   moderation.command("appeal <id>").description("Moder\xE1ci\xF3s d\xF6nt\xE9s elleni fellebbez\xE9s (POST /api/v1/shop/my/moderation/:id/appeal) \u2014 hat\xF3k\xF6r: write; az \xFCzenet min. 10 karakter").requiredOption("--message <sz\xF6veg>", "Fellebbez\xE9s sz\xF6vege (min. 10, max. 2000 karakter)").action(async (idStr, opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id) || id <= 0) {
-      process.stderr.write("\xC9rv\xE9nytelen moder\xE1ci\xF3-azonos\xEDt\xF3.\n");
-      process.exit(2);
+      failCli("\xC9rv\xE9nytelen moder\xE1ci\xF3-azonos\xEDt\xF3.\n", 2);
       return;
     }
     if (opts.message.length < 10) {
-      process.stderr.write("Az \xFCzenet legal\xE1bb 10 karakter kell legyen.\n");
-      process.exit(2);
+      failCli("Az \xFCzenet legal\xE1bb 10 karakter kell legyen.\n", 2);
       return;
     }
     try {
@@ -5071,7 +5105,7 @@ function registerModulesCommands(program2, client2) {
         printPricesTable(result.modules);
       }
     } catch (err) {
-      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      writeCliError(err);
       process.exitCode = 1;
     }
   });
@@ -5086,13 +5120,13 @@ function registerModulesCommands(program2, client2) {
         printSubscriptionsTable(result.modules);
       }
     } catch (err) {
-      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      writeCliError(err);
       process.exitCode = 1;
     }
   });
   modules.command("enable <moduleId>").description("Modul aktiv\xE1l\xE1sa (sz\xE1ml\xE1zott modul eset\xE9n SimplePay fizet\xE9si linket ad vissza)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (moduleId, opts, cmd) => {
     if (!MODULE_IDS.includes(moduleId)) {
-      console.error(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
+      writeCliError(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
       process.exitCode = 1;
       return;
     }
@@ -5121,13 +5155,13 @@ Fizet\xE9si link:
         if (result.message) console.log(result.message);
       }
     } catch (err) {
-      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      writeCliError(err);
       process.exitCode = 1;
     }
   });
   modules.command("cancel <moduleId>").description("Modul el\u0151fizet\xE9s lemond\xE1sa (az id\u0151szak v\xE9g\xE9ig akt\xEDv marad)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (moduleId, opts, cmd) => {
     if (!MODULE_IDS.includes(moduleId)) {
-      console.error(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
+      writeCliError(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
       process.exitCode = 1;
       return;
     }
@@ -5145,13 +5179,13 @@ Fizet\xE9si link:
         console.log("A modul az el\u0151fizet\xE9si id\u0151szak v\xE9g\xE9ig akt\xEDv marad.");
       }
     } catch (err) {
-      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      writeCliError(err);
       process.exitCode = 1;
     }
   });
   modules.command("resume <moduleId>").description("Lemondott modul \xFAjraind\xEDt\xE1sa (csak akkor, ha az id\u0151szak m\xE9g nem j\xE1rt le)").option("--yes", "Meger\u0151s\xEDt\xE9s kihagy\xE1sa").action(async (moduleId, opts, cmd) => {
     if (!MODULE_IDS.includes(moduleId)) {
-      console.error(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
+      writeCliError(`Ismeretlen modul: "${moduleId}". \xC9rv\xE9nyes \xE9rt\xE9kek: ${MODULE_IDS.join(", ")}`);
       process.exitCode = 1;
       return;
     }
@@ -5168,7 +5202,7 @@ Fizet\xE9si link:
         console.log(`Modul \xFAjraind\xEDtva: ${result.moduleId} (\xE1llapot: ${result.status})`);
       }
     } catch (err) {
-      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      writeCliError(err);
       process.exitCode = 1;
     }
   });
@@ -5195,9 +5229,8 @@ function parseJson(text, label) {
   try {
     return JSON.parse(text);
   } catch {
-    process.stderr.write(`\xC9rv\xE9nytelen JSON (${label}).
-`);
-    process.exit(2);
+    failCli(`\xC9rv\xE9nytelen JSON (${label}).
+`, 2);
   }
 }
 function fmtService(s) {
@@ -5299,7 +5332,7 @@ K\xF6vetkez\u0151 l\xE9p\xE9s:
       if (opts.headline !== void 0) partial.headline = opts.headline;
       if (opts.button !== void 0) partial.buttonLabel = opts.button;
       if (Object.keys(partial).length === 0) {
-        process.stderr.write("Legal\xE1bb egy opci\xF3t adj meg (pl. --accent, --background).\n");
+        writeCliError("Legal\xE1bb egy opci\xF3t adj meg (pl. --accent, --background).\n", { code: "invalid_input" });
         process.exitCode = 2;
         return;
       }
@@ -5352,7 +5385,7 @@ K\xF6vetkez\u0151 l\xE9p\xE9s:
     async (opts, cmd) => {
       const durationMin = parseInt(opts.duration, 10);
       if (isNaN(durationMin) || durationMin <= 0) {
-        process.stderr.write("--duration \xE9rt\xE9ke pozit\xEDv eg\xE9sz sz\xE1m kell legyen.\n");
+        writeCliError("--duration \xE9rt\xE9ke pozit\xEDv eg\xE9sz sz\xE1m kell legyen.\n", { code: "invalid_input" });
         process.exitCode = 2;
         return;
       }
@@ -5380,7 +5413,7 @@ ${fmtService(result)}
     async (idStr, opts, cmd) => {
       const id = parseInt(idStr, 10);
       if (isNaN(id)) {
-        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        writeCliError("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", { code: "invalid_input" });
         process.exitCode = 2;
         return;
       }
@@ -5389,7 +5422,7 @@ ${fmtService(result)}
       if (opts.duration !== void 0) {
         const dur = parseInt(opts.duration, 10);
         if (isNaN(dur) || dur <= 0) {
-          process.stderr.write("--duration \xE9rt\xE9ke pozit\xEDv eg\xE9sz sz\xE1m kell legyen.\n");
+          writeCliError("--duration \xE9rt\xE9ke pozit\xEDv eg\xE9sz sz\xE1m kell legyen.\n", { code: "invalid_input" });
           process.exitCode = 2;
           return;
         }
@@ -5399,7 +5432,7 @@ ${fmtService(result)}
       if (opts.description !== void 0) body.description = opts.description;
       if (opts.active !== void 0) body.active = opts.active;
       if (Object.keys(body).length === 0) {
-        process.stderr.write("Legal\xE1bb egy m\xF3dos\xEDtand\xF3 mez\u0151t adj meg.\n");
+        writeCliError("Legal\xE1bb egy m\xF3dos\xEDtand\xF3 mez\u0151t adj meg.\n", { code: "invalid_input" });
         process.exitCode = 2;
         return;
       }
@@ -5420,7 +5453,7 @@ ${fmtService(result)}
   service.command("remove <id>").description("Szolg\xE1ltat\xE1s t\xF6rl\xE9se (soft-delete)").action(async (idStr, _opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      writeCliError("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", { code: "invalid_input" });
       process.exitCode = 2;
       return;
     }
@@ -5477,7 +5510,7 @@ ${fmtResource(result)}
     async (idStr, opts, cmd) => {
       const id = parseInt(idStr, 10);
       if (isNaN(id)) {
-        process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+        writeCliError("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", { code: "invalid_input" });
         process.exitCode = 2;
         return;
       }
@@ -5486,7 +5519,7 @@ ${fmtResource(result)}
       if (opts.description !== void 0) body.description = opts.description;
       if (opts.active !== void 0) body.active = opts.active;
       if (Object.keys(body).length === 0) {
-        process.stderr.write("Legal\xE1bb egy m\xF3dos\xEDtand\xF3 mez\u0151t adj meg.\n");
+        writeCliError("Legal\xE1bb egy m\xF3dos\xEDtand\xF3 mez\u0151t adj meg.\n", { code: "invalid_input" });
         process.exitCode = 2;
         return;
       }
@@ -5507,7 +5540,7 @@ ${fmtResource(result)}
   resource.command("remove <id>").description("Er\u0151forr\xE1s t\xF6rl\xE9se (soft-delete)").action(async (idStr, _opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      writeCliError("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", { code: "invalid_input" });
       process.exitCode = 2;
       return;
     }
@@ -5535,8 +5568,9 @@ ${fmtResource(result)}
       );
       const hoursArray = Array.isArray(parsed) ? parsed : parsed.hours ?? parsed;
       if (!Array.isArray(hoursArray) || hoursArray.length === 0) {
-        process.stderr.write(
-          '\xC9rv\xE9nytelen form\xE1tum. Elv\xE1rt: { "hours": [...] } vagy [{ "day": ..., "open": ..., "close": ... }]\n'
+        writeCliError(
+          '\xC9rv\xE9nytelen form\xE1tum. Elv\xE1rt: { "hours": [...] } vagy [{ "day": ..., "open": ..., "close": ... }]',
+          { code: "invalid_input" }
         );
         process.exitCode = 2;
         return;
@@ -5583,7 +5617,7 @@ ${fmtResource(result)}
   closure.command("remove <id>").description("Z\xE1r\xE1s / kiv\xE9tel t\xF6rl\xE9se").action(async (idStr, _opts, cmd) => {
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
-      process.stderr.write("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n");
+      writeCliError("\xC9rv\xE9nytelen azonos\xEDt\xF3.\n", { code: "invalid_input" });
       process.exitCode = 2;
       return;
     }
@@ -5601,8 +5635,9 @@ ${fmtResource(result)}
   });
   booking.command("publish").description("Foglal\xE1si oldal k\xF6zz\xE9t\xE9tele (--yes k\xF6telez\u0151)").option("--yes", "Meger\u0151s\xEDt\xE9s").action(async (opts, cmd) => {
     if (!opts.yes) {
-      process.stderr.write(
-        "A k\xF6zz\xE9t\xE9telhez add meg a --yes kapcsol\xF3t: haszno booking publish --yes\n"
+      writeCliError(
+        "A k\xF6zz\xE9t\xE9telhez add meg a --yes kapcsol\xF3t: haszno booking publish --yes",
+        { code: "confirmation_required" }
       );
       process.exitCode = 1;
       return;
@@ -5622,8 +5657,9 @@ ${fmtResource(result)}
   });
   booking.command("unpublish").description("Foglal\xE1si oldal visszavon\xE1sa (--yes k\xF6telez\u0151)").option("--yes", "Meger\u0151s\xEDt\xE9s").action(async (opts, cmd) => {
     if (!opts.yes) {
-      process.stderr.write(
-        "A visszavon\xE1shoz add meg a --yes kapcsol\xF3t: haszno booking unpublish --yes\n"
+      writeCliError(
+        "A visszavon\xE1shoz add meg a --yes kapcsol\xF3t: haszno booking unpublish --yes",
+        { code: "confirmation_required" }
       );
       process.exitCode = 1;
       return;
@@ -6306,8 +6342,7 @@ function registerVaszonCommands(program2, sharedOpts2, version) {
   program2.command("vaszon").alias("canvas").description("Helyi h\xEDd: a V\xE1szon chatpanelje a g\xE9peden fut\xF3 Claude Code-ot vez\xE9rli (API-kulcs n\xE9lk\xFCl)").option("--port <port>", "helyi port", String(DEFAULT_BRIDGE_PORT)).option("--open", "a p\xE1ros\xEDt\xF3 link megnyit\xE1sa a b\xF6ng\xE9sz\u0151ben").option("--allow-origin <origin...>", "tov\xE1bbi enged\xE9lyezett webes eredet (fejleszt\xE9shez, pl. http://localhost:5173)").action(async (opts) => {
     const port = Number(opts.port);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-      process.stderr.write("\xC9rv\xE9nytelen port (1024\u201365535).\n");
-      process.exit(1);
+      failCli("\xC9rv\xE9nytelen port (1024\u201365535).\n", 1);
     }
     const conn = resolveConnection(sharedOpts2);
     const token = loadOrCreatePairingToken();
@@ -6366,56 +6401,6 @@ Le\xE1ll\xEDt\xE1s: Ctrl+C
 
 // src/commands/webshop.ts
 import { readFileSync as readFileSync6 } from "fs";
-
-// src/client/mcp.ts
-var McpToolError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "McpToolError";
-  }
-};
-function parseRpcBody(text) {
-  const trimmed = text.trimStart();
-  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
-  const data = text.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).pop();
-  if (!data) throw new Error("A Haszno MCP szerver \xFCres v\xE1laszt adott.");
-  return JSON.parse(data);
-}
-async function callMcpTool(name, args, opts = {}) {
-  const conn = resolveConnection(opts, process.env, opts.readConfig);
-  if (!isShopToken(conn.apiKey)) {
-    throw new Error("Ehhez bolt-kulcs (haszno_\u2026) kell: `haszno configure --api-key <kulcs>` vagy HASZNO_API_TOKEN.");
-  }
-  const fetchFn = opts.fetch ?? fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 6e4);
-  let response;
-  try {
-    response = await fetchFn(`${conn.baseUrl}/api/mcp`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-        Authorization: `Bearer ${conn.apiKey}`
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-  if (response.status === 401 || response.status === 403) {
-    throw new Error(`A kulcsot a szerver elutas\xEDtotta (HTTP ${response.status}). Ellen\u0151rizd: haszno whoami`);
-  }
-  if (!response.ok) throw new Error(`A Haszno MCP szerver hib\xE1t adott (HTTP ${response.status}).`);
-  const answer = parseRpcBody(await response.text());
-  if (answer.error) throw new McpToolError(answer.error.message ?? "Ismeretlen hiba");
-  const text = (answer.result?.content ?? []).map((part) => part.text ?? "").join("\n");
-  if (answer.result?.isError) throw new McpToolError(text || "Ismeretlen hiba");
-  return text;
-}
-
-// src/commands/webshop.ts
 function isJsonMode11(cmd) {
   let p = cmd;
   while (p) {
@@ -6454,7 +6439,7 @@ function registerWebshopCommands(program2, opts, call) {
     try {
       print(await callTool(name, given(build())), isJsonMode11(cmd));
     } catch (err) {
-      console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`);
+      writeCliError(err, { json: isJsonMode11(cmd) });
       process.exitCode = 1;
     }
   };
@@ -6495,7 +6480,10 @@ function registerWebshopCommands(program2, opts, call) {
   })));
   webshop.command("publish").description("A v\xE1zlat k\xF6zz\xE9t\xE9tele \u2014 a v\xE1s\xE1rl\xF3k ezt l\xE1tj\xE1k").option("--yes", "meger\u0151s\xEDt\xE9s").option(...slugOpt).action((o, cmd) => {
     if (!o.yes) {
-      console.error("A k\xF6zz\xE9t\xE9tel \xE9les\xEDti a v\xE1zlatot. Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.");
+      writeCliError(
+        "A k\xF6zz\xE9t\xE9tel \xE9les\xEDti a v\xE1zlatot. Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.",
+        { json: isJsonMode11(cmd), code: "confirmation_required" }
+      );
       process.exitCode = 1;
       return;
     }
@@ -6504,7 +6492,7 @@ function registerWebshopCommands(program2, opts, call) {
   webshop.command("guide [section]").description("Az oldal\xE9p\xEDt\u0151 \xFAtmutat\xF3 (vagy egy fejezete)").action((section, _o, cmd) => run(cmd, "haszno_site_builder_skill", () => ({ section })));
   webshop.command("tool <name>").description("B\xE1rmelyik haszno_webshop_* eszk\xF6z h\xEDv\xE1sa nyers argumentumokkal").option("--args <json>", "az argumentumok objektuma: JSON, @f\xE1jl vagy -", "{}").action((name, o, cmd) => {
     if (!/^haszno_(webshop_[a-z_]+|site_builder_skill)$/.test(name)) {
-      console.error("Csak haszno_webshop_* eszk\xF6z h\xEDvhat\xF3 \xEDgy.");
+      writeCliError("Csak haszno_webshop_* eszk\xF6z h\xEDvhat\xF3 \xEDgy.", { json: isJsonMode11(cmd), code: "invalid_input" });
       process.exitCode = 1;
       return;
     }
@@ -6684,9 +6672,8 @@ async function cmdApiDescribe(method, path, opts) {
   const entries = specEntries(spec);
   const match = findEntry(entries, method, path);
   if (!match) {
-    process.stderr.write(`Ismeretlen v\xE9gpont: ${method.toUpperCase()} ${path}
-`);
-    process.exit(1);
+    const message = `Ismeretlen v\xE9gpont: ${method.toUpperCase()} ${path}`;
+    failCli(message, 1, { json: opts.json, code: "not_found", human: message });
   }
   const { entry } = match;
   if (opts.json) {
@@ -6730,30 +6717,29 @@ async function cmdApiCall(method, path, opts) {
       entry = match.entry;
       pathParams = match.pathParams;
       risk = entry.risk;
-    } else {
+    } else if (!opts.json) {
       process.stderr.write(`Figyelmeztet\xE9s: a v\xE9gpont nincs a specifik\xE1ci\xF3ban \u2014 a h\xEDv\xE1s folytat\xF3dik.
 `);
     }
   } catch {
-    process.stderr.write(`Figyelmeztet\xE9s: nem siker\xFClt let\xF6lteni az OpenAPI specifik\xE1ci\xF3t \u2014 folytat\xE1s spec n\xE9lk\xFCl.
+    if (!opts.json) process.stderr.write(`Figyelmeztet\xE9s: nem siker\xFClt let\xF6lteni az OpenAPI specifik\xE1ci\xF3t \u2014 folytat\xE1s spec n\xE9lk\xFCl.
 `);
   }
   if (risk === "blocked") {
-    process.stderr.write(`Ez a v\xE9gpont le van tiltva (blocked) \u2014 a CLI megtagadja a h\xEDv\xE1st.
-`);
-    process.exit(1);
+    failCli("Ez a v\xE9gpont le van tiltva (blocked) \u2014 a CLI megtagadja a h\xEDv\xE1st.", 1, { json: opts.json, code: "forbidden" });
   }
   if (risk === "confirm") {
     if (opts.yes) {
     } else if (!isTtyFn()) {
-      process.stderr.write(`Ez a v\xE9gpont meger\u0151s\xEDt\xE9st ig\xE9nyel (confirm), de a bemenet nem TTY. Haszn\xE1lj --yes kapcsol\xF3t.
-`);
-      process.exit(1);
+      failCli(
+        "Ez a v\xE9gpont meger\u0151s\xEDt\xE9st ig\xE9nyel (confirm), de a bemenet nem TTY. Haszn\xE1lj --yes kapcsol\xF3t.",
+        1,
+        { json: opts.json, code: "confirmation_required" }
+      );
     } else {
       const ok = await askFn(`Meger\u0151s\xEDted a k\xF6vetkez\u0151 h\xEDv\xE1st: ${method.toUpperCase()} ${path}?`);
       if (!ok) {
-        process.stderr.write("Megszak\xEDtva.\n");
-        process.exit(1);
+        failCli("Megszak\xEDtva.", 1, { json: opts.json, code: "cancelled" });
       }
     }
   }
@@ -6780,17 +6766,13 @@ async function cmdApiCall(method, path, opts) {
       try {
         raw = readFileSync7(raw.slice(1), "utf-8");
       } catch (err) {
-        process.stderr.write(`Nem lehet olvasni a f\xE1jlt: ${raw.slice(1)}
-`);
-        process.exit(1);
+        failCli(`Nem lehet olvasni a f\xE1jlt: ${raw.slice(1)}`, 1, { json: opts.json, code: "invalid_input" });
       }
     }
     try {
       body = JSON.parse(raw);
     } catch {
-      process.stderr.write(`\xC9rv\xE9nytelen JSON: ${raw.slice(0, 80)}
-`);
-      process.exit(1);
+      failCli("\xC9rv\xE9nytelen JSON-t\xF6rzs.", 1, { json: opts.json, code: "invalid_input" });
     }
   }
   let result;
@@ -6802,15 +6784,7 @@ async function cmdApiCall(method, path, opts) {
       readConfig: opts._readConfig
     });
   } catch (err) {
-    const e = err;
-    if (e.statusCode === 403) {
-      process.stderr.write(`403 Tiltott hozz\xE1f\xE9r\xE9s \u2014 az API-kulcs nem rendelkezik a sz\xFCks\xE9ges jogosults\xE1gokkal.
-`);
-    } else {
-      process.stderr.write(`API hiba: ${e.message ?? String(err)}
-`);
-    }
-    process.exit(1);
+    failCli(err, 1, { json: opts.json });
   }
   if (opts.json || isRawJson(result)) {
     console.log(JSON.stringify(result, null, opts.json ? 2 : 0));
@@ -6841,12 +6815,6 @@ function registerApiCommands(program2, clientOpts) {
 
 // src/index.ts
 var program = new Command2().name("haszno").description("Haszno dropshipping CLI").version("0.8.0").option("--json", "output machine-readable JSON").option("--api-url <url>", "Haszno API base URL (overrides HASZNO_API_URL)").option("--api-key <key>", "Haszno API key (overrides HASZNO_API_KEY)");
-function buildClient(opts) {
-  return createClient({
-    baseUrl: opts.apiUrl,
-    apiKey: opts.apiKey
-  });
-}
 function argvFlag(name) {
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
@@ -6856,7 +6824,23 @@ function argvFlag(name) {
   return void 0;
 }
 var sharedOpts = { baseUrl: argvFlag("--api-url"), apiKey: argvFlag("--api-key") };
-var client = buildClient(sharedOpts);
+var { apiKey, basicAuth } = resolveConnection(sharedOpts);
+configureCliErrors(() => program.opts().json === true, [
+  apiKey,
+  basicAuth,
+  basicAuth && Buffer.from(basicAuth).toString("base64"),
+  process.env["HASZNO_PASSWORD"]
+]);
+program.configureOutput({
+  outputError: (message, write) => {
+    if (program.opts().json || process.argv.slice(2).includes("--json")) {
+      writeCliError(message.replace(/^error:\s*/i, ""), { json: true, code: "invalid_input" });
+    } else {
+      write(message);
+    }
+  }
+});
+var client = createClient(sharedOpts);
 var shopClient = createShopClient(sharedOpts);
 registerCatalogCommands(program, client);
 registerProductsCommands(program, client);
@@ -6865,7 +6849,7 @@ registerRulesCommands(program, client);
 registerOrdersCommands(program, client);
 registerIdeasCommands(program, client);
 registerFeedsCommands(program, client);
-registerAccountCommands(program, client);
+registerAccountCommands(program, client, { httpOpts: sharedOpts });
 registerCatalogueCommands(program, client);
 registerPeersCommands(program, client);
 registerBlogCommands(program, client);
@@ -6887,5 +6871,8 @@ program.hook("preAction", (thisCommand) => {
   }
   setCurrentCommandPath(`cli ${parts.join(" ")}`.trimEnd());
 });
-program.parse();
+program.parseAsync().catch((err) => {
+  writeCliError(err);
+  process.exitCode = 1;
+});
 //# sourceMappingURL=index.js.map

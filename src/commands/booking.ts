@@ -26,6 +26,7 @@
  * az összes booking művelet LegacyKeyNotSupportedError hibával meghiúsul.
  */
 
+import { failCli, writeCliError } from '../client/cli-error.js'
 import { readFileSync } from 'node:fs'
 import type { Command } from 'commander'
 import type {
@@ -61,8 +62,7 @@ function parseJson<T>(text: string, label: string): T {
   try {
     return JSON.parse(text) as T
   } catch {
-    process.stderr.write(`Érvénytelen JSON (${label}).\n`)
-    process.exit(2)
+    failCli(`Érvénytelen JSON (${label}).\n`, 2)
   }
 }
 
@@ -222,7 +222,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
         if (opts.button !== undefined) partial.buttonLabel = opts.button
 
         if (Object.keys(partial).length === 0) {
-          process.stderr.write('Legalább egy opciót adj meg (pl. --accent, --background).\n')
+          writeCliError('Legalább egy opciót adj meg (pl. --accent, --background).\n', { code: 'invalid_input' })
           process.exitCode = 2
           return
         }
@@ -288,7 +288,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
       ) => {
         const durationMin = parseInt(opts.duration, 10)
         if (isNaN(durationMin) || durationMin <= 0) {
-          process.stderr.write('--duration értéke pozitív egész szám kell legyen.\n')
+          writeCliError('--duration értéke pozitív egész szám kell legyen.\n', { code: 'invalid_input' })
           process.exitCode = 2
           return
         }
@@ -334,7 +334,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
       ) => {
         const id = parseInt(idStr, 10)
         if (isNaN(id)) {
-          process.stderr.write('Érvénytelen azonosító.\n')
+          writeCliError('Érvénytelen azonosító.\n', { code: 'invalid_input' })
           process.exitCode = 2
           return
         }
@@ -343,7 +343,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
         if (opts.duration !== undefined) {
           const dur = parseInt(opts.duration, 10)
           if (isNaN(dur) || dur <= 0) {
-            process.stderr.write('--duration értéke pozitív egész szám kell legyen.\n')
+            writeCliError('--duration értéke pozitív egész szám kell legyen.\n', { code: 'invalid_input' })
             process.exitCode = 2
             return
           }
@@ -354,7 +354,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
         if (opts.active !== undefined) body.active = opts.active
 
         if (Object.keys(body).length === 0) {
-          process.stderr.write('Legalább egy módosítandó mezőt adj meg.\n')
+          writeCliError('Legalább egy módosítandó mezőt adj meg.\n', { code: 'invalid_input' })
           process.exitCode = 2
           return
         }
@@ -377,7 +377,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id)) {
-        process.stderr.write('Érvénytelen azonosító.\n')
+        writeCliError('Érvénytelen azonosító.\n', { code: 'invalid_input' })
         process.exitCode = 2
         return
       }
@@ -458,7 +458,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
       ) => {
         const id = parseInt(idStr, 10)
         if (isNaN(id)) {
-          process.stderr.write('Érvénytelen azonosító.\n')
+          writeCliError('Érvénytelen azonosító.\n', { code: 'invalid_input' })
           process.exitCode = 2
           return
         }
@@ -468,7 +468,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
         if (opts.active !== undefined) body.active = opts.active
 
         if (Object.keys(body).length === 0) {
-          process.stderr.write('Legalább egy módosítandó mezőt adj meg.\n')
+          writeCliError('Legalább egy módosítandó mezőt adj meg.\n', { code: 'invalid_input' })
           process.exitCode = 2
           return
         }
@@ -491,7 +491,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id)) {
-        process.stderr.write('Érvénytelen azonosító.\n')
+        writeCliError('Érvénytelen azonosító.\n', { code: 'invalid_input' })
         process.exitCode = 2
         return
       }
@@ -532,9 +532,8 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
           : (parsed.hours ?? (parsed as unknown as BookingDayHours[]))
 
         if (!Array.isArray(hoursArray) || hoursArray.length === 0) {
-          process.stderr.write(
-            'Érvénytelen formátum. Elvárt: { "hours": [...] } vagy [{ "day": ..., "open": ..., "close": ... }]\n',
-          )
+          writeCliError('Érvénytelen formátum. Elvárt: { "hours": [...] } vagy [{ "day": ..., "open": ..., "close": ... }]',
+            { code: 'invalid_input' })
           process.exitCode = 2
           return
         }
@@ -598,7 +597,7 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
     .action(async (idStr: string, _opts: Record<string, unknown>, cmd: Command) => {
       const id = parseInt(idStr, 10)
       if (isNaN(id)) {
-        process.stderr.write('Érvénytelen azonosító.\n')
+        writeCliError('Érvénytelen azonosító.\n', { code: 'invalid_input' })
         process.exitCode = 2
         return
       }
@@ -622,9 +621,8 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
     .option('--yes', 'Megerősítés')
     .action(async (opts: { yes?: boolean }, cmd: Command) => {
       if (!opts.yes) {
-        process.stderr.write(
-          'A közzétételhez add meg a --yes kapcsolót: haszno booking publish --yes\n',
-        )
+        writeCliError('A közzétételhez add meg a --yes kapcsolót: haszno booking publish --yes',
+          { code: 'confirmation_required' })
         process.exitCode = 1
         return
       }
@@ -650,9 +648,8 @@ export function registerBookingCommands(program: Command, client: HasznoClient):
     .option('--yes', 'Megerősítés')
     .action(async (opts: { yes?: boolean }, cmd: Command) => {
       if (!opts.yes) {
-        process.stderr.write(
-          'A visszavonáshoz add meg a --yes kapcsolót: haszno booking unpublish --yes\n',
-        )
+        writeCliError('A visszavonáshoz add meg a --yes kapcsolót: haszno booking unpublish --yes',
+          { code: 'confirmation_required' })
         process.exitCode = 1
         return
       }

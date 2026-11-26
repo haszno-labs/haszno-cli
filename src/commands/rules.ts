@@ -21,6 +21,7 @@
  * Write operations require --yes; without it the command explains what would happen and exits 0.
  * Exit codes: 0 = ok, 1 = API/runtime error, 2 = usage error.
  */
+import { failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, Rule, RuleTemplate, RuleRun, RunResult } from '../client/index.js'
 
@@ -47,8 +48,7 @@ function fmtBool(v: boolean): string {
 }
 
 function die(msg: string, code = 1): never {
-  process.stderr.write(`Hiba: ${msg}\n`)
-  process.exit(code)
+  return failCli(msg, code)
 }
 
 function padR(s: string, w: number): string {

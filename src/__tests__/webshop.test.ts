@@ -27,7 +27,7 @@ beforeEach(() => {
   err = []
   process.exitCode = 0
   vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => (out.push(String(chunk)), true))
-  vi.spyOn(console, 'error').mockImplementation((...a) => void err.push(a.join(' ')))
+  vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { err.push(String(chunk)); return true })
 })
 afterEach(() => {
   vi.restoreAllMocks()
@@ -122,6 +122,7 @@ describe('callMcpTool', () => {
     const fetchMock = vi.fn()
     await expect(callMcpTool('x', {}, opts(fetchMock as unknown as typeof fetch, 'legacy-key'))).rejects.toThrow(/haszno_/)
     expect(fetchMock).not.toHaveBeenCalled()
-    await expect(callMcpTool('x', {}, opts((async () => new Response('', { status: 401 })) as unknown as typeof fetch))).rejects.toThrow(/401/)
+    await expect(callMcpTool('x', {}, opts((async () => new Response('', { status: 401 })) as unknown as typeof fetch)))
+      .rejects.toMatchObject({ status: 401, code: 'unauthenticated' })
   })
 })

@@ -29,6 +29,7 @@ import readline from 'node:readline'
 import { Command } from 'commander'
 import { request as rawRequest } from '../client/http.js'
 import { resolveConnection } from '../client/config.js'
+import { failCli } from '../client/cli-error.js'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -336,8 +337,8 @@ export async function cmdApiDescribe(
   const match = findEntry(entries, method, path)
 
   if (!match) {
-    process.stderr.write(`Ismeretlen végpont: ${method.toUpperCase()} ${path}\n`)
-    process.exit(1)
+    const message = `Ismeretlen végpont: ${method.toUpperCase()} ${path}`
+    failCli(message, 1, { json: opts.json, code: 'not_found', human: message })
   }
 
   const { entry } = match
@@ -406,17 +407,16 @@ export async function cmdApiCall(
       entry = match.entry
       pathParams = match.pathParams
       risk = entry.risk
-    } else {
+    } else if (!opts.json) {
       process.stderr.write(`Figyelmeztetés: a végpont nincs a specifikációban — a hívás folytatódik.\n`)
     }
   } catch {
-    process.stderr.write(`Figyelmeztetés: nem sikerült letölteni az OpenAPI specifikációt — folytatás spec nélkül.\n`)
+    if (!opts.json) process.stderr.write(`Figyelmeztetés: nem sikerült letölteni az OpenAPI specifikációt — folytatás spec nélkül.\n`)
   }
 
   // blocked
   if (risk === 'blocked') {
-    process.stderr.write(`Ez a végpont le van tiltva (blocked) — a CLI megtagadja a hívást.\n`)
-    process.exit(1)
+    failCli('Ez a végpont le van tiltva (blocked) — a CLI megtagadja a hívást.', 1, { json: opts.json, code: 'forbidden' })
   }
 
   // confirm
@@ -424,13 +424,12 @@ export async function cmdApiCall(
     if (opts.yes) {
       // --yes supplied: proceed
     } else if (!isTtyFn()) {
-      process.stderr.write(`Ez a végpont megerősítést igényel (confirm), de a bemenet nem TTY. Használj --yes kapcsolót.\n`)
-      process.exit(1)
+      failCli('Ez a végpont megerősítést igényel (confirm), de a bemenet nem TTY. Használj --yes kapcsolót.', 1,
+        { json: opts.json, code: 'confirmation_required' })
     } else {
       const ok = await askFn(`Megerősíted a következő hívást: ${method.toUpperCase()} ${path}?`)
       if (!ok) {
-        process.stderr.write('Megszakítva.\n')
-        process.exit(1)
+        failCli('Megszakítva.', 1, { json: opts.json, code: 'cancelled' })
       }
     }
   }
@@ -466,15 +465,13 @@ export async function cmdApiCall(
       try {
         raw = readFileSync(raw.slice(1), 'utf-8')
       } catch (err) {
-        process.stderr.write(`Nem lehet olvasni a fájlt: ${raw.slice(1)}\n`)
-        process.exit(1)
+        failCli(`Nem lehet olvasni a fájlt: ${raw.slice(1)}`, 1, { json: opts.json, code: 'invalid_input' })
       }
     }
     try {
       body = JSON.parse(raw)
     } catch {
-      process.stderr.write(`Érvénytelen JSON: ${raw.slice(0, 80)}\n`)
-      process.exit(1)
+      failCli('Érvénytelen JSON-törzs.', 1, { json: opts.json, code: 'invalid_input' })
     }
   }
 
@@ -488,13 +485,7 @@ export async function cmdApiCall(
       readConfig: opts._readConfig,
     })
   } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string }
-    if (e.statusCode === 403) {
-      process.stderr.write(`403 Tiltott hozzáférés — az API-kulcs nem rendelkezik a szükséges jogosultságokkal.\n`)
-    } else {
-      process.stderr.write(`API hiba: ${e.message ?? String(err)}\n`)
-    }
-    process.exit(1)
+    failCli(err, 1, { json: opts.json })
   }
 
   if (opts.json || isRawJson(result)) {

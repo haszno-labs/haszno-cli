@@ -13,6 +13,7 @@
  *   webshop, dropshipping_supplier, fitness, booking_salon,
  *   booking_clinic, booking_other, restaurant
  */
+import { writeCliError } from '../client/cli-error.js'
 import type { Command } from 'commander'
 import type { HasznoClient, ModulePrice, ModuleSubscription } from '../client/index.js'
 
@@ -90,7 +91,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
           printPricesTable(result.modules)
         }
       } catch (err) {
-        console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`)
+        writeCliError(err)
         process.exitCode = 1
       }
     })
@@ -110,7 +111,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
           printSubscriptionsTable(result.modules)
         }
       } catch (err) {
-        console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`)
+        writeCliError(err)
         process.exitCode = 1
       }
     })
@@ -123,7 +124,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
     .option('--yes', 'Megerősítés kihagyása')
     .action(async (moduleId: string, opts: { yes?: boolean }, cmd) => {
       if (!MODULE_IDS.includes(moduleId as (typeof MODULE_IDS)[number])) {
-        console.error(`Ismeretlen modul: "${moduleId}". Érvényes értékek: ${MODULE_IDS.join(', ')}`)
+        writeCliError(`Ismeretlen modul: "${moduleId}". Érvényes értékek: ${MODULE_IDS.join(', ')}`)
         process.exitCode = 1
         return
       }
@@ -150,7 +151,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
           if (result.message) console.log(result.message)
         }
       } catch (err) {
-        console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`)
+        writeCliError(err)
         process.exitCode = 1
       }
     })
@@ -163,7 +164,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
     .option('--yes', 'Megerősítés kihagyása')
     .action(async (moduleId: string, opts: { yes?: boolean }, cmd) => {
       if (!MODULE_IDS.includes(moduleId as (typeof MODULE_IDS)[number])) {
-        console.error(`Ismeretlen modul: "${moduleId}". Érvényes értékek: ${MODULE_IDS.join(', ')}`)
+        writeCliError(`Ismeretlen modul: "${moduleId}". Érvényes értékek: ${MODULE_IDS.join(', ')}`)
         process.exitCode = 1
         return
       }
@@ -181,7 +182,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
           console.log('A modul az előfizetési időszak végéig aktív marad.')
         }
       } catch (err) {
-        console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`)
+        writeCliError(err)
         process.exitCode = 1
       }
     })
@@ -194,7 +195,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
     .option('--yes', 'Megerősítés kihagyása')
     .action(async (moduleId: string, opts: { yes?: boolean }, cmd) => {
       if (!MODULE_IDS.includes(moduleId as (typeof MODULE_IDS)[number])) {
-        console.error(`Ismeretlen modul: "${moduleId}". Érvényes értékek: ${MODULE_IDS.join(', ')}`)
+        writeCliError(`Ismeretlen modul: "${moduleId}". Érvényes értékek: ${MODULE_IDS.join(', ')}`)
         process.exitCode = 1
         return
       }
@@ -211,7 +212,7 @@ export function registerModulesCommands(program: Command, client: HasznoClient):
           console.log(`Modul újraindítva: ${result.moduleId} (állapot: ${result.status})`)
         }
       } catch (err) {
-        console.error(`Hiba: ${err instanceof Error ? err.message : String(err)}`)
+        writeCliError(err)
         process.exitCode = 1
       }
     })
