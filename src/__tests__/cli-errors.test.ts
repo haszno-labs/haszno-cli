@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { Command } from 'commander'
 import { HasznoApiError } from '../client/error.js'
-import { configureCliErrors, failCli, writeCliError } from '../client/cli-error.js'
+import { configureCliErrors, configureCommandErrors, failCli, writeCliError } from '../client/cli-error.js'
 
 afterEach(() => {
   configureCliErrors(() => false, [])
@@ -37,4 +38,15 @@ it('redacts an echoed short password without mangling words or machine-readable 
     error: 'Rejected "[kitakarva]" and [kitakarva]',
     code: 'unauthenticated', requestId: 'request-e2',
   })
+})
+
+it('applies structured parser errors to manually attached commands', async () => {
+  const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+  const child = new Command('child').exitOverride().action(() => {})
+  const program = new Command().option('--json').addCommand(child)
+  configureCommandErrors(program, () => true)
+  await expect(program.parseAsync(['child', '--unknown', '--json'], { from: 'user' }))
+    .rejects.toMatchObject({ code: 'commander.unknownOption', exitCode: 1 })
+  expect(stderr).toHaveBeenCalledTimes(1)
+  expect(JSON.parse(String(stderr.mock.calls[0]?.[0]))).toMatchObject({ code: 'invalid_input' })
 })

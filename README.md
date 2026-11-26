@@ -359,7 +359,7 @@ haszno account me --json
 - `api.status` — public health result, independent of whether credentials exist
 - `auth.status` and `auth.scope` — identity check result and verified read/write scope, if available
 - `mcp.status` — hosted initialization result; `skipped` without a verified shop token. No tool or write is executed.
-- `apiOk` and `apiError` — backward-compatible identity-check result; use `api.status` for connectivity
+- `apiOk` and `apiError` — legacy identity-check fields; `apiError` is now a safe diagnostic summary rather than raw server text. Use `api.status` for connectivity.
 - `me` — subset of `/api/v1/auth/me` response (name, email, shopName, tokenScope)
 - `availableCommandGroups` — list of command groups that work with the current credential
 - `blockedForShopToken` — operations that return 403 for Bearer tokens (approve/reject/rollback, rules, feeds, settings, import-list, billing)

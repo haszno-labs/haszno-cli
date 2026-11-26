@@ -397,6 +397,18 @@ function configureCliErrors(isJson2, secrets) {
     return new RegExp(pattern, "gu");
   });
 }
+function configureCommandErrors(command, wantsJson) {
+  command.configureOutput({
+    outputError: (message, write) => {
+      if (wantsJson()) {
+        writeCliError(message.replace(/^error:\s*/i, ""), { json: true, code: "invalid_input" });
+      } else {
+        write(message);
+      }
+    }
+  });
+  for (const child of command.commands) configureCommandErrors(child, wantsJson);
+}
 function redact(value) {
   for (const secret of redactions) value = value.replace(secret, "[kitakarva]");
   return value.replace(/\bhaszno_(?:live|test|oa)_[A-Za-z0-9_-]+\b/g, "[kitakarva]");
@@ -520,7 +532,7 @@ async function cmdShow(client2, id, opts) {
   const products = await client2.products.list({ all: true });
   const p = products.find((x) => x.id === id);
   if (!p) {
-    writeCliError(`Nem tal\xE1lhat\xF3 term\xE9k: ${id}`);
+    writeCliError(`Nem tal\xE1lhat\xF3 term\xE9k: ${id}`, { code: "not_found" });
     process.exitCode = 1;
     return;
   }
@@ -6835,15 +6847,6 @@ configureCliErrors(() => program.opts().json === true, [
   basicAuth && Buffer.from(basicAuth).toString("base64"),
   process.env["HASZNO_PASSWORD"]
 ]);
-program.configureOutput({
-  outputError: (message, write) => {
-    if (program.opts().json || process.argv.slice(2).includes("--json")) {
-      writeCliError(message.replace(/^error:\s*/i, ""), { json: true, code: "invalid_input" });
-    } else {
-      write(message);
-    }
-  }
-});
 var client = createClient(sharedOpts);
 var shopClient = createShopClient(sharedOpts);
 registerCatalogCommands(program, client);
@@ -6866,6 +6869,7 @@ registerBookingCommands(program, client);
 registerVaszonCommands(program, sharedOpts, "0.8.0");
 registerWebshopCommands(program, sharedOpts);
 registerApiCommands(program, sharedOpts);
+configureCommandErrors(program, () => Boolean(program.opts().json || process.argv.slice(2).includes("--json")));
 program.hook("preAction", (thisCommand) => {
   const parts = [];
   let cmd = thisCommand;

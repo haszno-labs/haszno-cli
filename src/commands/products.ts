@@ -131,7 +131,7 @@ export async function cmdShow(client: HasznoClient, id: number, opts: ShowOpts):
   const products = await client.products.list({ all: true })
   const p = products.find(x => x.id === id)
   if (!p) {
-    writeCliError(`Nem található termék: ${id}`)
+    writeCliError(`Nem található termék: ${id}`, { code: 'not_found' })
     process.exitCode = 1
     return
   }

@@ -19,7 +19,7 @@
 import { Command } from 'commander'
 import { createClient } from './client/index.js'
 import { resolveConnection } from './client/config.js'
-import { configureCliErrors, writeCliError } from './client/cli-error.js'
+import { configureCliErrors, configureCommandErrors, writeCliError } from './client/cli-error.js'
 import { setCurrentCommandPath } from './client/tool-context.js'
 
 import { registerCatalogCommands } from './commands/catalog.js'
@@ -68,15 +68,6 @@ const { apiKey, basicAuth } = resolveConnection(sharedOpts)
 configureCliErrors(() => program.opts().json === true, [
   apiKey, basicAuth, basicAuth && Buffer.from(basicAuth).toString('base64'), process.env['HASZNO_PASSWORD'],
 ])
-program.configureOutput({
-  outputError: (message, write) => {
-    if (program.opts().json || process.argv.slice(2).includes('--json')) {
-      writeCliError(message.replace(/^error:\s*/i, ''), { json: true, code: 'invalid_input' })
-    } else {
-      write(message)
-    }
-  },
-})
 const client = createClient(sharedOpts)
 const shopClient = createShopClient(sharedOpts)
 
@@ -100,6 +91,8 @@ registerBookingCommands(program, client)
 registerVaszonCommands(program, sharedOpts, '0.8.0')
 registerWebshopCommands(program, sharedOpts)
 registerApiCommands(program, sharedOpts)
+
+configureCommandErrors(program, () => Boolean(program.opts().json || process.argv.slice(2).includes('--json')))
 
 // Record the invoked command path as "cli <subcommand path>" before each action.
 // This value is picked up by http.ts to populate the X-Haszno-Tool request header.

@@ -1,3 +1,4 @@
+import type { Command } from 'commander'
 import { HasznoApiError } from './error.js'
 
 let jsonMode = () => false
@@ -11,6 +12,20 @@ export function configureCliErrors(isJson: () => boolean, secrets: Array<string 
     const pattern = secret.length < 6 ? `(?<![\\p{L}\\p{N}_])${literal}(?![\\p{L}\\p{N}_])` : literal
     return new RegExp(pattern, 'gu')
   })
+}
+
+/** Manually attached Commander commands do not inherit the parent's output settings. */
+export function configureCommandErrors(command: Command, wantsJson: () => boolean): void {
+  command.configureOutput({
+    outputError: (message, write) => {
+      if (wantsJson()) {
+        writeCliError(message.replace(/^error:\s*/i, ''), { json: true, code: 'invalid_input' })
+      } else {
+        write(message)
+      }
+    },
+  })
+  for (const child of command.commands) configureCommandErrors(child, wantsJson)
 }
 
 function redact(value: string): string {
