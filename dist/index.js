@@ -20,7 +20,7 @@ import {
 } from "./chunk-HOIDK4EJ.js";
 
 // src/index.ts
-import { Command as Command2 } from "commander";
+import { Command as Command2, CommanderError } from "commander";
 
 // src/client/index.ts
 var ShopTokenNotSupportedError = class extends Error {
@@ -422,6 +422,7 @@ function apiHint(status, code) {
   if (status === 429 || code === "rate_limited") return "T\xFAl sok k\xE9r\xE9s \u2014 v\xE1rj egy percet \xE9s pr\xF3b\xE1ld \xFAjra.";
 }
 function writeCliError(err, { json = jsonMode(), code, human } = {}) {
+  if (err instanceof CliExit) throw err;
   const message = redact(err instanceof Error ? err.message : String(err)).trim();
   const api = err instanceof HasznoApiError ? err : void 0;
   const apiCode = typeof api?.code === "string" ? redact(api.code) : void 0;
@@ -449,7 +450,61 @@ function writeCliError(err, { json = jsonMode(), code, human } = {}) {
 }
 function failCli(err, exitCode = 1, options) {
   writeCliError(err, { code: exitCode === 2 ? "invalid_input" : void 0, ...options });
-  process.exit(exitCode);
+  exitCli(exitCode, err, options?.code);
+}
+var CliExit = class extends Error {
+  constructor(exitCode, originalError, code) {
+    super("CLI action ended");
+    this.exitCode = exitCode;
+    this.originalError = originalError;
+    this.code = code;
+  }
+  exitCode;
+  originalError;
+  code;
+};
+var deferExit = false;
+function deferCliExit() {
+  deferExit = true;
+}
+function exitCli(code, originalError, errorCode) {
+  if (deferExit) throw new CliExit(code, originalError, errorCode);
+  process.exit(code);
+}
+
+// src/client/invocation-diagnostics.ts
+function invocationResult(exitCode, error, code) {
+  if (exitCode === 0) return { outcome: "ok" };
+  const status = error instanceof HasznoApiError ? error.status : void 0;
+  if (status === 401 || status === 403 || code === "forbidden" || code === "confirmation_required") {
+    return { outcome: "blocked", reason: "permission_denied" };
+  }
+  if (code === "credentials_required") return { outcome: "blocked", reason: "not_configured" };
+  if (status === 404 || code === "not_found") return { outcome: "blocked", reason: "not_available" };
+  if (exitCode === 2 || status === 400 || status === 422 || code === "invalid_input") {
+    return { outcome: "error", reason: "invalid_input" };
+  }
+  if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
+    return { outcome: "error", reason: "timeout" };
+  }
+  return { outcome: "error", reason: "tool_error" };
+}
+async function reportCliInvocation(enabled, { baseUrl, apiKey: apiKey2 }, target2, result) {
+  if (!enabled || !isShopToken(apiKey2) || target2.length > 76 || !/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$/.test(target2)) return;
+  try {
+    const url = new URL(`${baseUrl}/api/agent/diagnostics`);
+    if (url.username || url.password || url.search || url.hash) return;
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) return;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey2}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "cli", kind: "invocation", target: target2, ...result }),
+      redirect: "error",
+      signal: AbortSignal.timeout(750)
+    });
+    await response.body?.cancel();
+  } catch {
+  }
 }
 
 // src/commands/catalog.ts
@@ -849,13 +904,13 @@ Eld\xF6ntve:    ${fmtDate2(row.decidedAt)}
       }
     }
     if (!opts.yes) {
-      const target = ids ? `ID: ${ids.join(", ")}` : "az \xF6sszes f\xFCgg\u0151 javaslat";
+      const target2 = ids ? `ID: ${ids.join(", ")}` : "az \xF6sszes f\xFCgg\u0151 javaslat";
       process.stdout.write(
-        `[DRY-RUN] J\xF3v\xE1hagy\xE1sra ker\xFClne: ${target}.
+        `[DRY-RUN] J\xF3v\xE1hagy\xE1sra ker\xFClne: ${target2}.
 Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -885,7 +940,7 @@ Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -908,7 +963,7 @@ Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 Futtat\xE1s v\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -1101,7 +1156,7 @@ function registerRulesCommands(program2, client2) {
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let rule;
     try {
@@ -1132,7 +1187,7 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let rule;
     try {
@@ -1156,7 +1211,7 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let rule;
     try {
@@ -1192,7 +1247,7 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let rule;
     try {
@@ -1216,7 +1271,7 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -1241,7 +1296,7 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -1262,7 +1317,7 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -1290,13 +1345,13 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
       }
     }
     if (!opts.yes) {
-      const target = productIds ? `term\xE9kek: ${productIds.join(", ")}` : "az \xF6sszes term\xE9k";
+      const target2 = productIds ? `term\xE9kek: ${productIds.join(", ")}` : "az \xF6sszes term\xE9k";
       process.stdout.write(
-        `[DRY-RUN] Triggert t\xFCzeln\xE9nk: "${triggerName}" (${target}).
+        `[DRY-RUN] Triggert t\xFCzeln\xE9nk: "${triggerName}" (${target2}).
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -1353,7 +1408,7 @@ Az \xF6sszes automatikus szab\xE1ly le\xE1ll v\xE9grehajt\xE1sig.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -1375,7 +1430,7 @@ V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 V\xE9grehajt\xE1shoz add meg a --yes kapcsol\xF3t.
 `
       );
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -1533,7 +1588,7 @@ function registerOrdersCommands(program2, client2) {
       const ok = await interactiveConfirm(`Biztosan sz\xE1ll\xEDtottk\xE9nt jel\xF6led a #${id} rendel\xE9st?`);
       if (!ok) {
         console.log("Megszak\xEDtva.");
-        process.exit(0);
+        exitCli(0);
       }
     }
     let updated;
@@ -1553,7 +1608,7 @@ function registerOrdersCommands(program2, client2) {
       const ok = await interactiveConfirm("Demo rendel\xE9st hozol l\xE9tre. Folytatod?");
       if (!ok) {
         console.log("Megszak\xEDtva.");
-        process.exit(0);
+        exitCli(0);
       }
     }
     let result;
@@ -1694,7 +1749,7 @@ function buildFillKeywordsCommand(rootProgram, client2) {
       } else {
         console.log(msg);
       }
-      process.exit(0);
+      exitCli(0);
     }
     let result;
     try {
@@ -2483,7 +2538,7 @@ Token elmentve: ${configPath}
       } else {
         process.stdout.write(result.ok ? "API: OK el\xE9rhet\u0151\n" : "API: nem v\xE1laszol\n");
       }
-      if (!result.ok) process.exit(1);
+      if (!result.ok) exitCli(1);
     } catch (err) {
       handleError2(err);
     }
@@ -2645,7 +2700,7 @@ Token elmentve: ${configPath}
       const ok = await askConfirm3("Biztosan frissited az arazasi beallitasokat?");
       if (!ok) {
         process.stdout.write("Megszakitva.\n");
-        process.exit(0);
+        exitCli(0);
         return;
       }
     }
@@ -2980,7 +3035,7 @@ Import lista: ${items.length} t\xE9tel
         const targetStr = opts.target ? ` \u2192 kapcsolat #${opts.target}` : "";
         console.log(`Kik\xFCld\xE9s: ${ids.length} term\xE9k${targetStr}.`);
         console.log("Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.");
-        process.exit(0);
+        exitCli(0);
         return;
       }
       if (opts.target != null) {
@@ -3064,7 +3119,7 @@ function registerPeersCommands(program2, client2) {
       if (!opts.yes) {
         console.log(`Megh\xEDv\xF3 l\xE9trehoz\xE1sa: sz\xE1ll\xEDt\xF3 #${opts.supplier}, lej\xE1r: ${opts.expires}.`);
         console.log("Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.");
-        process.exit(1);
+        exitCli(1);
         return;
       }
       const invite = await client2.peers.createInvite({
@@ -3106,7 +3161,7 @@ Megh\xEDv\xF3k: ${invites.length}
       if (!opts.yes) {
         console.log(`Elfogad\xE1s: "${code}" k\xF3d, "${opts.acceptor}" nev\xE9ben.`);
         console.log("Add meg a --yes kapcsol\xF3t a meger\u0151s\xEDt\xE9shez.");
-        process.exit(0);
+        exitCli(0);
         return;
       }
       const link = await client2.peers.acceptInvite(code, { acceptorId: opts.acceptor });
@@ -3355,7 +3410,7 @@ function registerReportCommands(program2, client2) {
     }
     if (!report) {
       process.stdout.write("M\xE9g nem \xE9rhet\u0151 el napi jelent\xE9s.\n");
-      process.exit(0);
+      exitCli(0);
       return;
     }
     if (isJsonMode7(cmd)) {
@@ -3991,7 +4046,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
           const ok = await askConfirm4("Feladjuk \xEDgy?");
           if (!ok) {
             process.stdout.write("Megszak\xEDtva.\n");
-            process.exit(0);
+            exitCli(0);
             return;
           }
         }
@@ -4241,7 +4296,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
         const ok = await askConfirm4(`Lefoglalod a #${adId} hirdet\xE9st?`);
         if (!ok) {
           process.stdout.write("Megszak\xEDtva.\n");
-          process.exit(0);
+          exitCli(0);
           return;
         }
       }
@@ -4597,7 +4652,7 @@ ${ad.description.split("\n").map((l) => `    ${l}`).join("\n")}
           const ok = await askConfirm4("Hirdet\xE9st adsz fel ezekkel az adatokkal?");
           if (!ok) {
             process.stdout.write("Megszak\xEDtva.\n");
-            process.exit(0);
+            exitCli(0);
             return;
           }
         }
@@ -4764,7 +4819,7 @@ El\u0151n\xE9zet \u2014 ${rows.length} hirdet\xE9s:
 Feladod mind a ${rows.length} hirdet\xE9st?`);
         if (!ok) {
           process.stdout.write("Megszak\xEDtva.\n");
-          process.exit(0);
+          exitCli(0);
           return;
         }
       }
@@ -4847,7 +4902,7 @@ Feladod mind a ${rows.length} hirdet\xE9st?`);
           process.stdout.write(`
 Meg\xE1ll\xE1s az els\u0151 hib\xE1n\xE1l. Feladva: ${posted}/${rows.length}
 `);
-          process.exit(1);
+          exitCli(1, err);
           return;
         }
       }
@@ -6373,14 +6428,7 @@ function registerVaszonCommands(program2, sharedOpts2, version) {
       shop,
       version
     });
-    server.on("error", (err) => {
-      process.stderr.write(
-        err.code === "EADDRINUSE" ? `A ${port}-es port foglalt \u2014 lehet, hogy a h\xEDd m\xE1r fut. M\xE1sik port: haszno vaszon --port <port>
-` : `A h\xEDd nem indult el: ${err.message}
-`
-      );
-      process.exit(1);
-    });
+    const startError = (err) => err.code === "EADDRINUSE" ? `A ${port}-es port foglalt \u2014 lehet, hogy a h\xEDd m\xE1r fut. M\xE1sik port: haszno vaszon --port <port>` : `A h\xEDd nem indult el: ${err.message}`;
     let lastLine = "";
     agent.onState((s) => {
       const line = [STATE_LINES[s.state] ?? s.state, s.command ?? s.detail ?? ""].filter(Boolean).join(" ");
@@ -6389,10 +6437,24 @@ function registerVaszonCommands(program2, sharedOpts2, version) {
       process.stdout.write(`  ${line}
 `);
     });
-    server.listen(port, "127.0.0.1", () => {
-      const link = pairingLink(conn.baseUrl, port, token);
-      process.stdout.write(
-        `Haszno V\xE1szon \u2014 helyi h\xEDd fut (127.0.0.1:${port})
+    try {
+      await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", () => {
+          server.removeListener("error", reject);
+          resolve();
+        });
+      });
+    } catch (err) {
+      failCli(err, 1, { human: startError(err), json: false });
+    }
+    server.on("error", (err) => {
+      process.stderr.write(startError(err) + "\n");
+      process.exit(1);
+    });
+    const link = pairingLink(conn.baseUrl, port, token);
+    process.stdout.write(
+      `Haszno V\xE1szon \u2014 helyi h\xEDd fut (127.0.0.1:${port})
 ` + (shop?.name ? `Bolt: ${shop.name}
 ` : "") + `
 Nyisd meg ezt a linket a b\xF6ng\xE9sz\u0151ben (egyszer kell, a p\xE1ros\xEDt\xE1s megmarad):
@@ -6401,10 +6463,9 @@ Nyisd meg ezt a linket a b\xF6ng\xE9sz\u0151ben (egyszer kell, a p\xE1ros\xEDt\x
 Le\xE1ll\xEDt\xE1s: Ctrl+C
 
 `
-      );
-      if (opts.open) openInBrowser(link);
-      void agent.start();
-    });
+    );
+    if (opts.open) openInBrowser(link);
+    void agent.start();
     const shutdown = () => {
       agent.stop();
       server.close();
@@ -6451,7 +6512,7 @@ function print(text, json) {
 }
 function registerWebshopCommands(program2, opts, call) {
   const callTool = call ?? ((name, args) => callMcpTool(name, args, opts));
-  const run = async (cmd, name, build) => {
+  const run2 = async (cmd, name, build) => {
     try {
       print(await callTool(name, given(build())), isJsonMode11(cmd));
     } catch (err) {
@@ -6462,12 +6523,12 @@ function registerWebshopCommands(program2, opts, call) {
   const webshop = program2.command("webshop").description("A hosztolt webshop oldalszerkeszt\u0151je: oldalak, widgetek, m\xE1rka, k\xF6zz\xE9t\xE9tel");
   const slugOpt = ["--slug <slug>", "melyik webshop (ha a fi\xF3kban t\xF6bb van)"];
   const baseOpt = ["--base-version <n>", "a legut\xF3bb beolvasott draftVersion \u2014 \xFCtk\xF6z\xE9s ellen, mindig add meg"];
-  webshop.command("list").description("A fi\xF3k webshopjai").action((_o, cmd) => run(cmd, "haszno_webshop_list", () => ({})));
-  webshop.command("pages").description("A v\xE1zlat oldalai \xE9s a draftVersion").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_list_pages", () => ({ slug: o.slug })));
-  webshop.command("inspect [page]").description("A teljes v\xE1zlat, vagy egy oldal a widgetjeivel (home vagy az oldal slugja)").option(...slugOpt).option("--verbose", "minden be\xE1ll\xEDt\xE1s, r\xF6vid\xEDt\xE9s n\xE9lk\xFCl").action((page, o, cmd) => page === void 0 ? run(cmd, "haszno_webshop_inspect", () => ({ slug: o.slug, verbose: o.verbose })) : run(cmd, "haszno_webshop_inspect_page", () => ({ slug: o.slug, page })));
-  webshop.command("widgets").description("A haszn\xE1lhat\xF3 widgetek").option("--category <category>", "csak egy kateg\xF3ria").action((o, cmd) => run(cmd, "haszno_webshop_list_widgets", () => ({ category: o.category })));
-  webshop.command("widget <type>").description("Egy widget be\xE1ll\xEDt\xE1sai \xE9s p\xE9ld\xE1ja").action((type, _o, cmd) => run(cmd, "haszno_webshop_describe_widget", () => ({ type })));
-  webshop.command("batch").description("Oldalm\u0171veletek egy ment\xE9sben (create_page, add_widget, update_widget, \u2026)").requiredOption("--ops <json>", "a m\u0171veletek t\xF6mbje: JSON, @f\xE1jl vagy - (szabv\xE1nyos bemenet)").option(...baseOpt).option("--expect <json>", 'elv\xE1rt eredm\xE9ny (pl. {"pages":{"home":{"widgets":5}}}) \u2014 JSON, @f\xE1jl').option("--dry-run", "csak ellen\u0151rz\xE9s, ment\xE9s n\xE9lk\xFCl").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_page_batch", () => {
+  webshop.command("list").description("A fi\xF3k webshopjai").action((_o, cmd) => run2(cmd, "haszno_webshop_list", () => ({})));
+  webshop.command("pages").description("A v\xE1zlat oldalai \xE9s a draftVersion").option(...slugOpt).action((o, cmd) => run2(cmd, "haszno_webshop_list_pages", () => ({ slug: o.slug })));
+  webshop.command("inspect [page]").description("A teljes v\xE1zlat, vagy egy oldal a widgetjeivel (home vagy az oldal slugja)").option(...slugOpt).option("--verbose", "minden be\xE1ll\xEDt\xE1s, r\xF6vid\xEDt\xE9s n\xE9lk\xFCl").action((page, o, cmd) => page === void 0 ? run2(cmd, "haszno_webshop_inspect", () => ({ slug: o.slug, verbose: o.verbose })) : run2(cmd, "haszno_webshop_inspect_page", () => ({ slug: o.slug, page })));
+  webshop.command("widgets").description("A haszn\xE1lhat\xF3 widgetek").option("--category <category>", "csak egy kateg\xF3ria").action((o, cmd) => run2(cmd, "haszno_webshop_list_widgets", () => ({ category: o.category })));
+  webshop.command("widget <type>").description("Egy widget be\xE1ll\xEDt\xE1sai \xE9s p\xE9ld\xE1ja").action((type, _o, cmd) => run2(cmd, "haszno_webshop_describe_widget", () => ({ type })));
+  webshop.command("batch").description("Oldalm\u0171veletek egy ment\xE9sben (create_page, add_widget, update_widget, \u2026)").requiredOption("--ops <json>", "a m\u0171veletek t\xF6mbje: JSON, @f\xE1jl vagy - (szabv\xE1nyos bemenet)").option(...baseOpt).option("--expect <json>", 'elv\xE1rt eredm\xE9ny (pl. {"pages":{"home":{"widgets":5}}}) \u2014 JSON, @f\xE1jl').option("--dry-run", "csak ellen\u0151rz\xE9s, ment\xE9s n\xE9lk\xFCl").option(...slugOpt).action((o, cmd) => run2(cmd, "haszno_webshop_page_batch", () => {
     const ops = readJsonArg(o.ops, "--ops");
     if (!Array.isArray(ops)) throw new Error("A(z) --ops m\u0171veletek t\xF6mbje legyen.");
     return {
@@ -6478,7 +6539,7 @@ function registerWebshopCommands(program2, opts, call) {
       dryRun: o.dryRun
     };
   }));
-  webshop.command("brand").description("M\xE1rka: sz\xEDnek, bet\u0171t\xEDpusok, log\xF3, diz\xE1jn").option("--primary <color>", "els\u0151dleges sz\xEDn (#rrggbb)").option("--secondary <color>", "m\xE1sodlagos sz\xEDn (#rrggbb)").option("--font <family>", "sz\xF6vegbet\u0171").option("--display-font <family>", "c\xEDmbet\u0171").option("--logo <url>", "log\xF3 URL").option("--design <name>", "diz\xE1jn neve").option(...baseOpt).option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_set_brand", () => ({
+  webshop.command("brand").description("M\xE1rka: sz\xEDnek, bet\u0171t\xEDpusok, log\xF3, diz\xE1jn").option("--primary <color>", "els\u0151dleges sz\xEDn (#rrggbb)").option("--secondary <color>", "m\xE1sodlagos sz\xEDn (#rrggbb)").option("--font <family>", "sz\xF6vegbet\u0171").option("--display-font <family>", "c\xEDmbet\u0171").option("--logo <url>", "log\xF3 URL").option("--design <name>", "diz\xE1jn neve").option(...baseOpt).option(...slugOpt).action((o, cmd) => run2(cmd, "haszno_webshop_set_brand", () => ({
     slug: o.slug,
     primaryColor: o.primary,
     secondaryColor: o.secondary,
@@ -6488,9 +6549,9 @@ function registerWebshopCommands(program2, opts, call) {
     design: o.design,
     baseVersion: o.baseVersion === void 0 ? void 0 : wholeNumber(o.baseVersion, "--base-version")
   })));
-  webshop.command("validate").description("A v\xE1zlat ellen\u0151rz\xE9se (hib\xE1k \xE9s figyelmeztet\xE9sek)").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_validate", () => ({ slug: o.slug })));
-  webshop.command("preview").description("El\u0151n\xE9zeti link a v\xE1zlathoz").option("--page <page>", "melyik oldal").option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_preview_url", () => ({ slug: o.slug, page: o.page })));
-  webshop.command("undo").description("A v\xE1zlat visszal\xE9ptet\xE9se egy verzi\xF3val").option(...baseOpt).option(...slugOpt).action((o, cmd) => run(cmd, "haszno_webshop_undo", () => ({
+  webshop.command("validate").description("A v\xE1zlat ellen\u0151rz\xE9se (hib\xE1k \xE9s figyelmeztet\xE9sek)").option(...slugOpt).action((o, cmd) => run2(cmd, "haszno_webshop_validate", () => ({ slug: o.slug })));
+  webshop.command("preview").description("El\u0151n\xE9zeti link a v\xE1zlathoz").option("--page <page>", "melyik oldal").option(...slugOpt).action((o, cmd) => run2(cmd, "haszno_webshop_preview_url", () => ({ slug: o.slug, page: o.page })));
+  webshop.command("undo").description("A v\xE1zlat visszal\xE9ptet\xE9se egy verzi\xF3val").option(...baseOpt).option(...slugOpt).action((o, cmd) => run2(cmd, "haszno_webshop_undo", () => ({
     slug: o.slug,
     baseVersion: o.baseVersion === void 0 ? void 0 : wholeNumber(o.baseVersion, "--base-version")
   })));
@@ -6503,16 +6564,16 @@ function registerWebshopCommands(program2, opts, call) {
       process.exitCode = 1;
       return;
     }
-    return run(cmd, "haszno_webshop_publish", () => ({ slug: o.slug }));
+    return run2(cmd, "haszno_webshop_publish", () => ({ slug: o.slug }));
   });
-  webshop.command("guide [section]").description("Az oldal\xE9p\xEDt\u0151 \xFAtmutat\xF3 (vagy egy fejezete)").action((section, _o, cmd) => run(cmd, "haszno_site_builder_skill", () => ({ section })));
+  webshop.command("guide [section]").description("Az oldal\xE9p\xEDt\u0151 \xFAtmutat\xF3 (vagy egy fejezete)").action((section, _o, cmd) => run2(cmd, "haszno_site_builder_skill", () => ({ section })));
   webshop.command("tool <name>").description("B\xE1rmelyik haszno_webshop_* eszk\xF6z h\xEDv\xE1sa nyers argumentumokkal").option("--args <json>", "az argumentumok objektuma: JSON, @f\xE1jl vagy -", "{}").action((name, o, cmd) => {
     if (!/^haszno_(webshop_[a-z_]+|site_builder_skill)$/.test(name)) {
       writeCliError("Csak haszno_webshop_* eszk\xF6z h\xEDvhat\xF3 \xEDgy.", { json: isJsonMode11(cmd), code: "invalid_input" });
       process.exitCode = 1;
       return;
     }
-    return run(cmd, name, () => {
+    return run2(cmd, name, () => {
       const args = readJsonArg(o.args, "--args");
       if (args === null || typeof args !== "object" || Array.isArray(args)) throw new Error("A(z) --args objektum legyen.");
       return args;
@@ -6840,7 +6901,8 @@ function argvFlag(name) {
   return void 0;
 }
 var sharedOpts = { baseUrl: argvFlag("--api-url"), apiKey: argvFlag("--api-key") };
-var { apiKey, basicAuth } = resolveConnection(sharedOpts);
+var connection = resolveConnection(sharedOpts);
+var { apiKey, basicAuth } = connection;
 configureCliErrors(() => program.opts().json === true, [
   apiKey,
   basicAuth,
@@ -6870,17 +6932,55 @@ registerVaszonCommands(program, sharedOpts, "0.8.0");
 registerWebshopCommands(program, sharedOpts);
 registerApiCommands(program, sharedOpts);
 configureCommandErrors(program, () => Boolean(program.opts().json || process.argv.slice(2).includes("--json")));
-program.hook("preAction", (thisCommand) => {
+function commandPath(action) {
   const parts = [];
-  let cmd = thisCommand;
+  let cmd = action;
   while (cmd !== null && cmd !== program) {
     parts.unshift(cmd.name());
     cmd = cmd.parent ?? null;
   }
-  setCurrentCommandPath(`cli ${parts.join(" ")}`.trimEnd());
+  return parts;
+}
+var diagnostics = process.env["HASZNO_DIAGNOSTICS"] === "1";
+var target;
+var parserTarget;
+if (diagnostics) {
+  deferCliExit();
+  const captureParserExit = (command) => {
+    command.exitOverride((error) => {
+      if (error.code === "commander.unknownCommand") parserTarget = "command-not-found";
+      else if (error.exitCode !== 0) parserTarget = commandPath(command).join(".") || "invalid-command";
+      throw error;
+    });
+    command.commands.forEach(captureParserExit);
+  };
+  captureParserExit(program);
+}
+program.hook("preAction", (_owner, action) => {
+  const path = commandPath(action);
+  target = path.join(".");
+  setCurrentCommandPath(`cli ${path.join(" ")}`.trimEnd());
 });
-program.parseAsync().catch((err) => {
-  writeCliError(err);
-  process.exitCode = 1;
-});
+async function run() {
+  let result;
+  try {
+    await program.parseAsync();
+    result = invocationResult(Number(process.exitCode ?? 0));
+  } catch (err) {
+    if (err instanceof CliExit) {
+      process.exitCode = err.exitCode;
+      result = invocationResult(err.exitCode, err.originalError, err.code);
+    } else if (diagnostics && err instanceof CommanderError) {
+      process.exitCode = err.exitCode;
+      result = err.code === "commander.unknownCommand" ? { outcome: "blocked", reason: "not_available" } : invocationResult(2);
+    } else {
+      writeCliError(err);
+      process.exitCode = 1;
+      result = invocationResult(1, err);
+    }
+  }
+  const name = target ?? parserTarget;
+  if (name) await reportCliInvocation(diagnostics, connection, name, result);
+}
+void run();
 //# sourceMappingURL=index.js.map

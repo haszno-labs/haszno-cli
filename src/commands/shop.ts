@@ -46,7 +46,7 @@
  * Note: reserving is free — payment happens directly between buyer and seller.
  */
 
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 import { createInterface } from 'node:readline'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
@@ -475,7 +475,7 @@ export function registerShopCommands(
             const ok = await askConfirm('Feladjuk így?')
             if (!ok) {
               process.stdout.write('Megszakítva.\n')
-              process.exit(0)
+              exitCli(0)
               return
             }
           }
@@ -770,7 +770,7 @@ export function registerShopCommands(
             'A foglalás INGYENES — a fizetés és az átadás közvetlenül az eladóval történik.\n',
           )
           const ok = await askConfirm(`Lefoglalod a #${adId} hirdetést?`)
-          if (!ok) { process.stdout.write('Megszakítva.\n'); process.exit(0); return }
+          if (!ok) { process.stdout.write('Megszakítva.\n'); exitCli(0); return }
         }
 
         try {
@@ -1141,7 +1141,7 @@ export function registerShopCommands(
         if (opts.post) {
           if (!opts.yes) {
             const ok = await askConfirm('Hirdetést adsz fel ezekkel az adatokkal?')
-            if (!ok) { process.stdout.write('Megszakítva.\n'); process.exit(0); return }
+            if (!ok) { process.stdout.write('Megszakítva.\n'); exitCli(0); return }
           }
           // Build body from extracted data and post
           const body: Record<string, unknown> = {
@@ -1325,7 +1325,7 @@ export function registerShopCommands(
 
         if (!opts.yes) {
           const ok = await askConfirm(`\nFeladod mind a ${rows.length} hirdetést?`)
-          if (!ok) { process.stdout.write('Megszakítva.\n'); process.exit(0); return }
+          if (!ok) { process.stdout.write('Megszakítva.\n'); exitCli(0); return }
         }
 
         let posted = 0
@@ -1407,7 +1407,7 @@ export function registerShopCommands(
             const msg = err instanceof HasznoApiError ? `HTTP ${err.status}: ${err.message}` : String(err)
             process.stdout.write(`  ✗ Hiba (${row.title}): ${msg}\n`)
             process.stdout.write(`\nMegállás az első hibánál. Feladva: ${posted}/${rows.length}\n`)
-            process.exit(1)
+            exitCli(1, err)
             return
           }
         }

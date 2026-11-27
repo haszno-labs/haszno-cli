@@ -35,7 +35,7 @@ import { CONFIG_PATH, readConfigFile, readConfigObject, type HasznoConfig } from
 import { type HttpOptions } from '../client/http.js'
 import { cliLogin } from '../client/shop.js'
 import { checkDoctor } from '../client/doctor.js'
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 
 export { CONFIG_PATH, LEGACY_CONFIG_PATH, readConfigFile, type HasznoConfig } from '../client/config.js'
 
@@ -337,7 +337,7 @@ export function registerAccountCommands(
         } else {
           process.stdout.write(result.ok ? 'API: OK elérhető\n' : 'API: nem válaszol\n')
         }
-        if (!result.ok) process.exit(1)
+        if (!result.ok) exitCli(1)
       } catch (err) {
         handleError(err)
       }
@@ -550,7 +550,7 @@ export function registerAccountCommands(
         const ok = await askConfirm('Biztosan frissited az arazasi beallitasokat?')
         if (!ok) {
           process.stdout.write('Megszakitva.\n')
-          process.exit(0)
+          exitCli(0)
           return
         }
       }

@@ -49,6 +49,7 @@ function apiHint(status: number, code?: string): string | undefined {
 }
 
 export function writeCliError(err: unknown, { json = jsonMode(), code, human }: ErrorOptions = {}): void {
+  if (err instanceof CliExit) throw err
   const message = redact(err instanceof Error ? err.message : String(err)).trim()
   const api = err instanceof HasznoApiError ? err : undefined
   const apiCode = typeof api?.code === 'string' ? redact(api.code) : undefined
@@ -72,5 +73,22 @@ export function writeCliError(err: unknown, { json = jsonMode(), code, human }: 
 
 export function failCli(err: unknown, exitCode = 1, options?: ErrorOptions): never {
   writeCliError(err, { code: exitCode === 2 ? 'invalid_input' : undefined, ...options })
-  process.exit(exitCode)
+  exitCli(exitCode, err, options?.code)
+}
+
+export class CliExit extends Error {
+  constructor(readonly exitCode: number, readonly originalError?: unknown, readonly code?: string) {
+    super('CLI action ended')
+  }
+}
+
+let deferExit = false
+
+export function deferCliExit(): void {
+  deferExit = true
+}
+
+export function exitCli(code: number, originalError?: unknown, errorCode?: string): never {
+  if (deferExit) throw new CliExit(code, originalError, errorCode)
+  process.exit(code)
 }

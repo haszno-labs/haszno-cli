@@ -13,7 +13,7 @@
  *
  *   haszno connections list [--status <s>]
  */
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type {
   HasznoClient,
@@ -243,7 +243,7 @@ export function registerCatalogueCommands(program: Command, client: HasznoClient
           const targetStr = opts.target ? ` → kapcsolat #${opts.target}` : ''
           console.log(`Kiküldés: ${ids.length} termék${targetStr}.`)
           console.log('Add meg a --yes kapcsolót a megerősítéshez.')
-          process.exit(0)
+          exitCli(0)
           return
         }
 

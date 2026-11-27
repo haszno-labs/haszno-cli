@@ -12,7 +12,7 @@
  * Writes need --yes; without it the command explains what would happen and exits 0.
  * Exit codes: 0 = ok, 1 = API/runtime error, 2 = usage error.
  */
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 import { randomUUID } from 'node:crypto'
 import { Command } from 'commander'
 import type { HasznoClient, Proposal, ProposalStatus, ApproveResult, RollbackResult, AgentProposalResult } from '../client/index.js'
@@ -221,7 +221,7 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
           `[DRY-RUN] Jóváhagyásra kerülne: ${target}.\n` +
             `Futtatás végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: ApproveResult
@@ -262,7 +262,7 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
           `[DRY-RUN] Elutasításra kerülne: ID ${ids.join(', ')}.\n` +
             `Futtatás végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: { rejected: number }
@@ -292,7 +292,7 @@ export function registerProposalsCommands(program: Command, client: HasznoClient
           `[DRY-RUN] Visszagörgetésre kerülne: batch "${opts.batch}".\n` +
             `Futtatás végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: RollbackResult

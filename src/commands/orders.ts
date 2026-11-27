@@ -13,7 +13,7 @@
  *   1  runtime error (API error, order not found, …)
  *   2  usage error (missing required argument, bad flag value, …)
  */
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, Order } from '../client/index.js'
 
@@ -192,7 +192,7 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
         const ok = await interactiveConfirm(`Biztosan szállítottként jelöled a #${id} rendelést?`)
         if (!ok) {
           console.log('Megszakítva.')
-          process.exit(0)
+          exitCli(0)
         }
       }
       let updated: Order
@@ -218,7 +218,7 @@ export function registerOrdersCommands(program: Command, client: HasznoClient): 
         const ok = await interactiveConfirm('Demo rendelést hozol létre. Folytatod?')
         if (!ok) {
           console.log('Megszakítva.')
-          process.exit(0)
+          exitCli(0)
         }
       }
       let result: { id: number }

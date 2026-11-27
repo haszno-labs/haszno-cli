@@ -164,14 +164,9 @@ export function registerVaszonCommands(program: Command, sharedOpts: { baseUrl?:
         version,
       })
 
-      server.on('error', (err: NodeJS.ErrnoException) => {
-        process.stderr.write(
-          err.code === 'EADDRINUSE'
-            ? `A ${port}-es port foglalt — lehet, hogy a híd már fut. Másik port: haszno vaszon --port <port>\n`
-            : `A híd nem indult el: ${err.message}\n`,
-        )
-        process.exit(1)
-      })
+      const startError = (err: NodeJS.ErrnoException) => err.code === 'EADDRINUSE'
+        ? `A ${port}-es port foglalt — lehet, hogy a híd már fut. Másik port: haszno vaszon --port <port>`
+        : `A híd nem indult el: ${err.message}`
 
       let lastLine = ''
       agent.onState((s) => {
@@ -181,17 +176,30 @@ export function registerVaszonCommands(program: Command, sharedOpts: { baseUrl?:
         process.stdout.write(`  ${line}\n`)
       })
 
-      server.listen(port, '127.0.0.1', () => {
-        const link = pairingLink(conn.baseUrl, port, token)
-        process.stdout.write(
-          `Haszno Vászon — helyi híd fut (127.0.0.1:${port})\n` +
-            (shop?.name ? `Bolt: ${shop.name}\n` : '') +
-            `\nNyisd meg ezt a linket a böngészőben (egyszer kell, a párosítás megmarad):\n  ${link}\n\n` +
-            'Leállítás: Ctrl+C\n\n',
-        )
-        if (opts.open) openInBrowser(link)
-        void agent.start()
+      try {
+        await new Promise<void>((resolve, reject) => {
+          server.once('error', reject)
+          server.listen(port, '127.0.0.1', () => {
+            server.removeListener('error', reject)
+            resolve()
+          })
+        })
+      } catch (err) {
+        failCli(err, 1, { human: startError(err as NodeJS.ErrnoException), json: false })
+      }
+      server.on('error', (err: NodeJS.ErrnoException) => {
+        process.stderr.write(startError(err) + '\n')
+        process.exit(1)
       })
+      const link = pairingLink(conn.baseUrl, port, token)
+      process.stdout.write(
+        `Haszno Vászon — helyi híd fut (127.0.0.1:${port})\n` +
+          (shop?.name ? `Bolt: ${shop.name}\n` : '') +
+          `\nNyisd meg ezt a linket a böngészőben (egyszer kell, a párosítás megmarad):\n  ${link}\n\n` +
+          'Leállítás: Ctrl+C\n\n',
+      )
+      if (opts.open) openInBrowser(link)
+      void agent.start()
 
       const shutdown = () => {
         agent.stop()

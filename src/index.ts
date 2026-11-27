@@ -16,10 +16,11 @@
  *   haszno rules run 2
  *   haszno vaszon                 (local bridge: the Vászon chat drives your own Claude Code)
  */
-import { Command } from 'commander'
+import { Command, CommanderError } from 'commander'
 import { createClient } from './client/index.js'
 import { resolveConnection } from './client/config.js'
-import { configureCliErrors, configureCommandErrors, writeCliError } from './client/cli-error.js'
+import { CliExit, configureCliErrors, configureCommandErrors, deferCliExit, writeCliError } from './client/cli-error.js'
+import { invocationResult, reportCliInvocation } from './client/invocation-diagnostics.js'
 import { setCurrentCommandPath } from './client/tool-context.js'
 
 import { registerCatalogCommands } from './commands/catalog.js'
@@ -64,7 +65,8 @@ function argvFlag(name: string): string | undefined {
 }
 
 const sharedOpts = { baseUrl: argvFlag('--api-url'), apiKey: argvFlag('--api-key') }
-const { apiKey, basicAuth } = resolveConnection(sharedOpts)
+const connection = resolveConnection(sharedOpts)
+const { apiKey, basicAuth } = connection
 configureCliErrors(() => program.opts().json === true, [
   apiKey, basicAuth, basicAuth && Buffer.from(basicAuth).toString('base64'), process.env['HASZNO_PASSWORD'],
 ])
@@ -94,19 +96,59 @@ registerApiCommands(program, sharedOpts)
 
 configureCommandErrors(program, () => Boolean(program.opts().json || process.argv.slice(2).includes('--json')))
 
-// Record the invoked command path as "cli <subcommand path>" before each action.
-// This value is picked up by http.ts to populate the X-Haszno-Tool request header.
-program.hook('preAction', (thisCommand) => {
+function commandPath(action: Command): string[] {
   const parts: string[] = []
-  let cmd: Command | null = thisCommand
+  let cmd: Command | null = action
   while (cmd !== null && cmd !== program) {
     parts.unshift(cmd.name())
     cmd = cmd.parent ?? null
   }
-  setCurrentCommandPath(`cli ${parts.join(' ')}`.trimEnd())
+  return parts
+}
+
+const diagnostics = process.env['HASZNO_DIAGNOSTICS'] === '1'
+let target: string | undefined
+let parserTarget: string | undefined
+if (diagnostics) {
+  deferCliExit()
+  const captureParserExit = (command: Command) => {
+    command.exitOverride((error) => {
+      if (error.code === 'commander.unknownCommand') parserTarget = 'command-not-found'
+      else if (error.exitCode !== 0) parserTarget = commandPath(command).join('.') || 'invalid-command'
+      throw error
+    })
+    command.commands.forEach(captureParserExit)
+  }
+  captureParserExit(program)
+}
+
+program.hook('preAction', (_owner, action) => {
+  const path = commandPath(action)
+  target = path.join('.')
+  // Use registered command names, never argv or option values.
+  setCurrentCommandPath(`cli ${path.join(' ')}`.trimEnd())
 })
 
-program.parseAsync().catch(err => {
-  writeCliError(err)
-  process.exitCode = 1
-})
+async function run() {
+  let result: ReturnType<typeof invocationResult>
+  try {
+    await program.parseAsync()
+    result = invocationResult(Number(process.exitCode ?? 0))
+  } catch (err) {
+    if (err instanceof CliExit) {
+      process.exitCode = err.exitCode
+      result = invocationResult(err.exitCode, err.originalError, err.code)
+    } else if (diagnostics && err instanceof CommanderError) {
+      process.exitCode = err.exitCode
+      result = err.code === 'commander.unknownCommand' ? { outcome: 'blocked', reason: 'not_available' } : invocationResult(2)
+    } else {
+      writeCliError(err)
+      process.exitCode = 1
+      result = invocationResult(1, err)
+    }
+  }
+  const name = target ?? parserTarget
+  if (name) await reportCliInvocation(diagnostics, connection, name, result)
+}
+
+void run()
