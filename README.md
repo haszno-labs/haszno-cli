@@ -418,6 +418,17 @@ The config file is only consulted when no credentials come from a flag or the en
 
 The file is written with `chmod 600` — readable only by your user.
 
+### Optional diagnostics
+
+Set `HASZNO_DIAGNOSTICS=1` for a command to report its registered command name
+and a fixed outcome to your configured Haszno API, using your shop Bearer key.
+Reports never contain arguments, URLs from arguments, or error text. A command
+reports once even when it makes multiple HTTP requests; reporting is off by
+default, can wait up to 750 ms, and does not affect the command result. Unrecognized commands use a
+fixed label rather than transmitting what was typed.
+For the long-running `vaszon` bridge, the invocation records startup only;
+it does not report ongoing bridge activity or failures after startup.
+
 ---
 
 ## Related repositories

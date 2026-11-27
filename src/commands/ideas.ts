@@ -17,7 +17,7 @@
  *   1  runtime error (API failure, etc.)
  *   2  usage error / validation failure
  */
-import { failCli, writeCliError } from '../client/cli-error.js'
+import { exitCli, failCli, writeCliError } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, RecommendationItem, Recommendations } from '../client/index.js'
 import * as readline from 'node:readline'
@@ -194,7 +194,7 @@ function buildFillKeywordsCommand(rootProgram: Command, client: HasznoClient): C
         } else {
           console.log(msg)
         }
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: { updated: number }

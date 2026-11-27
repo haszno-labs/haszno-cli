@@ -6,7 +6,7 @@
  *
  * Exit codes: 0 OK, 1 runtime error, 2 usage/validation error.
  */
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 import type { Command } from 'commander'
 import type { HasznoClient, DailyReport, ReportItem, ReportItemKind } from '../client/index.js'
 
@@ -161,7 +161,7 @@ export function registerReportCommands(program: Command, client: HasznoClient): 
 
       if (!report) {
         process.stdout.write('Még nem érhető el napi jelentés.\n')
-        process.exit(0)
+        exitCli(0)
         return
       }
 

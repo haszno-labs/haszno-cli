@@ -21,7 +21,7 @@
  * Write operations require --yes; without it the command explains what would happen and exits 0.
  * Exit codes: 0 = ok, 1 = API/runtime error, 2 = usage error.
  */
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, Rule, RuleTemplate, RuleRun, RunResult } from '../client/index.js'
 
@@ -251,7 +251,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           ` (trigger: ${tpl.trigger}, enabled: ${!opts.disabled}).\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let rule: Rule
@@ -289,7 +289,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Aktiválnánk: szabály ID=${id}.\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let rule: Rule
@@ -320,7 +320,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Kikapcsolnánk: szabály ID=${id}.\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let rule: Rule
@@ -372,7 +372,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Módosítanánk: szabály ID=${id} → ${changes}.\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let rule: Rule
@@ -403,7 +403,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Törölnénk: szabály ID=${id}. Ez a művelet visszafordíthatatlan!\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: { deleted: boolean }
@@ -434,7 +434,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Lefuttatnánk: szabály ID=${id}.\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: RunResult
@@ -462,7 +462,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Lefuttatnánk az összes manuális szabályt.\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: RunResult
@@ -509,7 +509,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Triggert tüzelnénk: "${triggerName}" (${target}).\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: RunResult
@@ -584,7 +584,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `Az összes automatikus szabály leáll végrehajtásig.\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: { paused: boolean }
@@ -612,7 +612,7 @@ export function registerRulesCommands(program: Command, client: HasznoClient): v
           `[DRY-RUN] Folytatnánk az automatizálást.\n` +
           `Végrehajtáshoz add meg a --yes kapcsolót.\n`,
         )
-        process.exit(0)
+        exitCli(0)
       }
 
       let result: { paused: boolean }

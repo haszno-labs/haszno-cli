@@ -1,5 +1,6 @@
 import type { Command } from 'commander'
 import { HasznoApiError } from './error.js'
+import { invocationResult } from './invocation-diagnostics.js'
 
 let jsonMode = () => false
 let redactions: RegExp[] = []
@@ -49,6 +50,8 @@ function apiHint(status: number, code?: string): string | undefined {
 }
 
 export function writeCliError(err: unknown, { json = jsonMode(), code, human }: ErrorOptions = {}): void {
+  if (err instanceof CliExit) throw err
+  if (deferExit) observedFailure = invocationResult(1, err, code)
   const message = redact(err instanceof Error ? err.message : String(err)).trim()
   const api = err instanceof HasznoApiError ? err : undefined
   const apiCode = typeof api?.code === 'string' ? redact(api.code) : undefined
@@ -72,5 +75,30 @@ export function writeCliError(err: unknown, { json = jsonMode(), code, human }: 
 
 export function failCli(err: unknown, exitCode = 1, options?: ErrorOptions): never {
   writeCliError(err, { code: exitCode === 2 ? 'invalid_input' : undefined, ...options })
-  process.exit(exitCode)
+  exitCli(exitCode)
+}
+
+export class CliExit extends Error {
+  constructor(readonly exitCode: number) {
+    super('CLI action ended')
+  }
+}
+
+let deferExit = false
+let observedFailure: ReturnType<typeof invocationResult> | undefined
+
+export function deferCliExit(): void {
+  deferExit = true
+}
+
+export function commandDiagnosticOutcome(code: number): ReturnType<typeof invocationResult> {
+  return code !== 0 && observedFailure ? observedFailure : invocationResult(code)
+}
+
+export function exitCli(code: number, originalError?: unknown): never {
+  if (deferExit) {
+    if (originalError !== undefined) observedFailure = invocationResult(code, originalError)
+    throw new CliExit(code)
+  }
+  process.exit(code)
 }

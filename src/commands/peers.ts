@@ -7,7 +7,7 @@
  *   haszno peers list                                          list own invites
  *   haszno peers accept <code> --acceptor <shopId> [--yes]    accept an invite
  */
-import { failCli } from '../client/cli-error.js'
+import { exitCli, failCli } from '../client/cli-error.js'
 import { Command } from 'commander'
 import type { HasznoClient, PeerInvite } from '../client/index.js'
 
@@ -59,7 +59,7 @@ export function registerPeersCommands(program: Command, client: HasznoClient): v
         if (!opts.yes) {
           console.log(`Meghívó létrehozása: szállító #${opts.supplier}, lejár: ${opts.expires}.`)
           console.log('Add meg a --yes kapcsolót a megerősítéshez.')
-          process.exit(1)
+          exitCli(1)
           return
         }
 
@@ -108,7 +108,7 @@ export function registerPeersCommands(program: Command, client: HasznoClient): v
         if (!opts.yes) {
           console.log(`Elfogadás: "${code}" kód, "${opts.acceptor}" nevében.`)
           console.log('Add meg a --yes kapcsolót a megerősítéshez.')
-          process.exit(0)
+          exitCli(0)
           return
         }
 
