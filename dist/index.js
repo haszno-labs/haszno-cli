@@ -386,6 +386,41 @@ function createLegacyClient(opts) {
   };
 }
 
+// src/client/invocation-diagnostics.ts
+function invocationResult(exitCode, error, code) {
+  if (exitCode === 0) return { outcome: "ok" };
+  const status = error instanceof HasznoApiError ? error.status : void 0;
+  if (status === 401 || status === 403 || code === "forbidden" || code === "confirmation_required") {
+    return { outcome: "blocked", reason: "permission_denied" };
+  }
+  if (code === "credentials_required") return { outcome: "blocked", reason: "not_configured" };
+  if (status === 404 || code === "not_found") return { outcome: "blocked", reason: "not_available" };
+  if (exitCode === 2 || status === 400 || status === 422 || code === "invalid_input") {
+    return { outcome: "error", reason: "invalid_input" };
+  }
+  if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
+    return { outcome: "error", reason: "timeout" };
+  }
+  return { outcome: "error", reason: "tool_error" };
+}
+async function reportCliInvocation(enabled, { baseUrl, apiKey: apiKey2 }, target2, result) {
+  if (!enabled || !isShopToken(apiKey2) || target2.length > 76 || !/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$/.test(target2)) return;
+  try {
+    const url = new URL(`${baseUrl}/api/agent/diagnostics`);
+    if (url.username || url.password || url.search || url.hash) return;
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) return;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey2}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "cli", kind: "invocation", target: target2, ...result }),
+      redirect: "error",
+      signal: AbortSignal.timeout(750)
+    });
+    await response.body?.cancel();
+  } catch {
+  }
+}
+
 // src/client/cli-error.ts
 var jsonMode = () => false;
 var redactions = [];
@@ -423,6 +458,7 @@ function apiHint(status, code) {
 }
 function writeCliError(err, { json = jsonMode(), code, human } = {}) {
   if (err instanceof CliExit) throw err;
+  if (deferExit) observedFailure = invocationResult(1, err, code);
   const message = redact(err instanceof Error ? err.message : String(err)).trim();
   const api = err instanceof HasznoApiError ? err : void 0;
   const apiCode = typeof api?.code === "string" ? redact(api.code) : void 0;
@@ -450,61 +486,29 @@ function writeCliError(err, { json = jsonMode(), code, human } = {}) {
 }
 function failCli(err, exitCode = 1, options) {
   writeCliError(err, { code: exitCode === 2 ? "invalid_input" : void 0, ...options });
-  exitCli(exitCode, err, options?.code);
+  exitCli(exitCode);
 }
 var CliExit = class extends Error {
-  constructor(exitCode, originalError, code) {
+  constructor(exitCode) {
     super("CLI action ended");
     this.exitCode = exitCode;
-    this.originalError = originalError;
-    this.code = code;
   }
   exitCode;
-  originalError;
-  code;
 };
 var deferExit = false;
+var observedFailure;
 function deferCliExit() {
   deferExit = true;
 }
-function exitCli(code, originalError, errorCode) {
-  if (deferExit) throw new CliExit(code, originalError, errorCode);
+function commandDiagnosticOutcome(code) {
+  return code !== 0 && observedFailure ? observedFailure : invocationResult(code);
+}
+function exitCli(code, originalError) {
+  if (deferExit) {
+    if (originalError !== void 0) observedFailure = invocationResult(code, originalError);
+    throw new CliExit(code);
+  }
   process.exit(code);
-}
-
-// src/client/invocation-diagnostics.ts
-function invocationResult(exitCode, error, code) {
-  if (exitCode === 0) return { outcome: "ok" };
-  const status = error instanceof HasznoApiError ? error.status : void 0;
-  if (status === 401 || status === 403 || code === "forbidden" || code === "confirmation_required") {
-    return { outcome: "blocked", reason: "permission_denied" };
-  }
-  if (code === "credentials_required") return { outcome: "blocked", reason: "not_configured" };
-  if (status === 404 || code === "not_found") return { outcome: "blocked", reason: "not_available" };
-  if (exitCode === 2 || status === 400 || status === 422 || code === "invalid_input") {
-    return { outcome: "error", reason: "invalid_input" };
-  }
-  if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
-    return { outcome: "error", reason: "timeout" };
-  }
-  return { outcome: "error", reason: "tool_error" };
-}
-async function reportCliInvocation(enabled, { baseUrl, apiKey: apiKey2 }, target2, result) {
-  if (!enabled || !isShopToken(apiKey2) || target2.length > 76 || !/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$/.test(target2)) return;
-  try {
-    const url = new URL(`${baseUrl}/api/agent/diagnostics`);
-    if (url.username || url.password || url.search || url.hash) return;
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) return;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey2}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ source: "cli", kind: "invocation", target: target2, ...result }),
-      redirect: "error",
-      signal: AbortSignal.timeout(750)
-    });
-    await response.body?.cancel();
-  } catch {
-  }
 }
 
 // src/commands/catalog.ts
@@ -6965,11 +6969,11 @@ async function run() {
   let result;
   try {
     await program.parseAsync();
-    result = invocationResult(Number(process.exitCode ?? 0));
+    result = commandDiagnosticOutcome(Number(process.exitCode ?? 0));
   } catch (err) {
     if (err instanceof CliExit) {
       process.exitCode = err.exitCode;
-      result = invocationResult(err.exitCode, err.originalError, err.code);
+      result = commandDiagnosticOutcome(err.exitCode);
     } else if (diagnostics && err instanceof CommanderError) {
       process.exitCode = err.exitCode;
       result = err.code === "commander.unknownCommand" ? { outcome: "blocked", reason: "not_available" } : invocationResult(2);

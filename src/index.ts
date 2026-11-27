@@ -19,7 +19,7 @@
 import { Command, CommanderError } from 'commander'
 import { createClient } from './client/index.js'
 import { resolveConnection } from './client/config.js'
-import { CliExit, configureCliErrors, configureCommandErrors, deferCliExit, writeCliError } from './client/cli-error.js'
+import { CliExit, commandDiagnosticOutcome, configureCliErrors, configureCommandErrors, deferCliExit, writeCliError } from './client/cli-error.js'
 import { invocationResult, reportCliInvocation } from './client/invocation-diagnostics.js'
 import { setCurrentCommandPath } from './client/tool-context.js'
 
@@ -133,11 +133,11 @@ async function run() {
   let result: ReturnType<typeof invocationResult>
   try {
     await program.parseAsync()
-    result = invocationResult(Number(process.exitCode ?? 0))
+    result = commandDiagnosticOutcome(Number(process.exitCode ?? 0))
   } catch (err) {
     if (err instanceof CliExit) {
       process.exitCode = err.exitCode
-      result = invocationResult(err.exitCode, err.originalError, err.code)
+      result = commandDiagnosticOutcome(err.exitCode)
     } else if (diagnostics && err instanceof CommanderError) {
       process.exitCode = err.exitCode
       result = err.code === 'commander.unknownCommand' ? { outcome: 'blocked', reason: 'not_available' } : invocationResult(2)

@@ -89,4 +89,15 @@ describe('CLI invocation diagnostics', () => {
     expect(observed.some((request) => request.path === '/api/test')).toBe(true)
     expect(observed.some((request) => request.path === '/api/agent/diagnostics')).toBe(false)
   }, 15000)
+
+  it('keeps the typed reason when an action sets an exit code without throwing', async () => {
+    const before = requests.length
+    const blocked = await cli(true, ['webshop', 'publish'])
+    expect(blocked.code).toBe(1)
+    expect(JSON.parse(blocked.stderr)).toMatchObject({ code: 'confirmation_required' })
+    expect(requests.slice(before)).toMatchObject([{
+      path: '/api/agent/diagnostics',
+      body: { source: 'cli', kind: 'invocation', target: 'webshop.publish', outcome: 'blocked', reason: 'permission_denied' },
+    }])
+  }, 15000)
 })
