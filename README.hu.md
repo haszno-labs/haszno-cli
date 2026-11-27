@@ -253,6 +253,10 @@ A fájl `chmod 600` jogosultsággal íródik — csak a te felhasználód olvash
 
 ---
 
+## Étteremoldal
+
+A `haszno restaurant site --json` a Haszno MCP-n keresztül olvassa ki a bejelentkezett bolt saját éttermét, a közzététel állapotát, a rendelési és admincímet, valamint az étlapot. Bolt-token kell hozzá, adatot nem módosít. A rendelési cím közzétételig `null`; a Munchi-listázás címe önmagában nem jelenti, hogy a listázás már él.
+
 ## Webshop-szerkesztő — oldalak, widgetek, márka
 
 A `haszno webshop …` a hosztolt webshop oldalszerkesztőjét vezérli terminálból vagy szkriptből. Minden parancs a

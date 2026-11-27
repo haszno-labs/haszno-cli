@@ -5720,6 +5720,20 @@ ${fmtResource(result)}
   });
 }
 
+// src/commands/restaurant.ts
+function registerRestaurantCommands(program2, options) {
+  program2.command("restaurant").description("Saj\xE1t \xE9tterem a Haszno rendszer\xE9ben").command("site").description("A saj\xE1t \xE9tterem rendel\xE9si \xE9s adminc\xEDme, k\xF6zz\xE9t\xE9teli \xE1llapota \xE9s \xE9tlapja").action(async (_options, cmd) => {
+    const json = cmd.optsWithGlobals().json === true;
+    try {
+      const answer = JSON.parse(await callMcpTool("haszno_restaurant_get_site", {}, options));
+      process.stdout.write(JSON.stringify(answer, null, json ? 0 : 2) + "\n");
+    } catch (error) {
+      writeCliError(error instanceof SyntaxError ? new Error("A Haszno MCP nem \xE9rv\xE9nyes JSON-adatot adott vissza.") : error, { json });
+      process.exitCode = 1;
+    }
+  });
+}
+
 // src/commands/vaszon.ts
 import { spawn as spawn2 } from "child_process";
 import { randomBytes as randomBytes2 } from "crypto";
@@ -6866,6 +6880,7 @@ registerActionsCommands(program, client);
 registerShopCommands(program, shopClient);
 registerModulesCommands(program, client);
 registerBookingCommands(program, client);
+registerRestaurantCommands(program, sharedOpts);
 registerVaszonCommands(program, sharedOpts, "0.8.0");
 registerWebshopCommands(program, sharedOpts);
 registerApiCommands(program, sharedOpts);
