@@ -6967,15 +6967,16 @@ program.hook("preAction", (_owner, action) => {
 });
 async function run() {
   let result;
+  let forcedExit;
   try {
     await program.parseAsync();
     result = commandDiagnosticOutcome(Number(process.exitCode ?? 0));
   } catch (err) {
     if (err instanceof CliExit) {
-      process.exitCode = err.exitCode;
+      forcedExit = err.exitCode;
       result = commandDiagnosticOutcome(err.exitCode);
     } else if (diagnostics && err instanceof CommanderError) {
-      process.exitCode = err.exitCode;
+      forcedExit = err.exitCode;
       result = err.code === "commander.unknownCommand" ? { outcome: "blocked", reason: "not_available" } : invocationResult(2);
     } else {
       writeCliError(err);
@@ -6985,6 +6986,7 @@ async function run() {
   }
   const name = target ?? parserTarget;
   if (name) await reportCliInvocation(diagnostics, connection, name, result);
+  if (forcedExit !== void 0) process.exit(forcedExit);
 }
 void run();
 //# sourceMappingURL=index.js.map

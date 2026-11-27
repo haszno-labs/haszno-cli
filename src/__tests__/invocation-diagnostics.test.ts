@@ -4,7 +4,9 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { HasznoApiError } from '../client/error.js'
+import { invocationResult, reportCliInvocation } from '../client/invocation-diagnostics.js'
 
 const token = `haszno_${'t'.repeat(43)}`
 const fixture = mkdtempSync(join(tmpdir(), 'haszno-cli-diagnostics-'))
@@ -54,6 +56,41 @@ function cli(enabled: boolean, args: string[]) {
 }
 
 describe('CLI invocation diagnostics', () => {
+  it('maps structured failures to fixed reasons without retaining their messages', () => {
+    for (const [status, expected] of [
+      [401, 'permission_denied'], [403, 'permission_denied'], [404, 'not_available'],
+      [400, 'invalid_input'], [422, 'invalid_input'],
+    ] as const) {
+      expect(invocationResult(1, new HasznoApiError(status, 'private'))).toEqual({
+        outcome: status === 400 || status === 422 ? 'error' : 'blocked', reason: expected,
+      })
+    }
+    expect(invocationResult(1, new DOMException('private', 'TimeoutError'))).toEqual({ outcome: 'error', reason: 'timeout' })
+    expect(invocationResult(1, undefined, 'credentials_required')).toEqual({ outcome: 'blocked', reason: 'not_configured' })
+  })
+
+  it('never calls fetch when the destination, credentials or command are unsafe', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const result = invocationResult(0)
+    const safe = { baseUrl: 'https://haszno.example', apiKey: token }
+    try {
+      for (const baseUrl of [
+        'http://untrusted.example', 'http://localhost.evil.example', 'ftp://haszno.example',
+        'https://user:secret@haszno.example', 'https://haszno.example?private', 'https://haszno.example#private',
+      ]) {
+        await reportCliInvocation(true, { ...safe, baseUrl }, 'api.get', result)
+      }
+      await reportCliInvocation(false, safe, 'api.get', result)
+      await reportCliInvocation(true, { ...safe, apiKey: 'legacy' }, 'api.get', result)
+      await reportCliInvocation(true, safe, 'api ./secret', result)
+      await reportCliInvocation(true, safe, 'a'.repeat(77), result)
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('reports one command, not two HTTP requests, even when reporting fails', async () => {
     const before = requests.length
     const result = await cli(true, ['api', 'GET', '/api/test', '--query', 'private=some-value'])
@@ -100,4 +137,16 @@ describe('CLI invocation diagnostics', () => {
       body: { source: 'cli', kind: 'invocation', target: 'webshop.publish', outcome: 'blocked', reason: 'permission_denied' },
     }])
   }, 15000)
+
+  it('preserves parser JSON output and explicit exit behavior when enabled', async () => {
+    const badArgs = ['products', 'list', '--unknown-option']
+    const parserError = await cli(false, badArgs)
+    expect(JSON.parse(parserError.stderr)).toMatchObject({ code: 'invalid_input' })
+    expect(await cli(true, badArgs)).toEqual(parserError)
+
+    const noConfirmation = ['peers', 'invite', '--supplier', '5', '--expires', '2026-12-31T23:59:00Z']
+    const refusal = await cli(false, noConfirmation)
+    expect(refusal.code).toBe(1)
+    expect(await cli(true, noConfirmation)).toEqual(refusal)
+  }, 30000)
 })

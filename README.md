@@ -424,8 +424,10 @@ Set `HASZNO_DIAGNOSTICS=1` for a command to report its registered command name
 and a fixed outcome to your configured Haszno API, using your shop Bearer key.
 Reports never contain arguments, URLs from arguments, or error text. A command
 reports once even when it makes multiple HTTP requests; reporting is off by
-default and does not affect the command result. Unrecognized commands use a
+default, can wait up to 750 ms, and does not affect the command result. Unrecognized commands use a
 fixed label rather than transmitting what was typed.
+For the long-running `vaszon` bridge, the invocation records startup only;
+it does not report ongoing bridge activity or failures after startup.
 
 ---
 
