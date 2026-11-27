@@ -266,7 +266,7 @@ haszno actions propose --type import --network-product-id 99 --reason "Jó margi
 
 ## Restaurant site
 
-`haszno restaurant site --json` reads the authenticated shop's restaurant, its publication status, ordering and admin URLs, and menu through the Haszno MCP server. It needs a shop token and does not write data. The ordering URL is `null` until the site is published; the Munchi listing URL is not a confirmation that Munchi has published it.
+`haszno restaurant site --json` reads the authenticated shop's restaurant, its publication status, ordering and admin URLs, and menu through the Haszno MCP server. It needs a shop token and does not write data. The ordering URL is `null` until the site is published. Without a Munchi integration, the listing URL is also `null`; a listing URL does not confirm that Munchi has published it.
 
 ## Webshop editor — pages, widgets, brand
 

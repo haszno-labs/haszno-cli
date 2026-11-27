@@ -4,7 +4,7 @@ import { registerRestaurantCommands } from '../commands/restaurant.js'
 
 const site = {
   restaurant: { name: 'Sarok', slug: 'sarok', country: 'HU', published: false },
-  urls: { order: null, admin: 'https://admin.munchi.hu/sarok', munchiListing: 'https://munchi.hu/restaurants/sarok' },
+  urls: { order: null, admin: 'https://admin.munchi.hu/sarok', munchiListing: null },
   menu: { categories: [], items: [] },
 }
 const token = 'haszno_test_fixture'
@@ -24,7 +24,7 @@ afterEach(() => {
   process.exitCode = 0
 })
 
-it('reads the current shop via its authenticated MCP tool, preserving a missing public order URL', async () => {
+it('reads the current shop via its authenticated MCP tool, preserving absent order and Munchi listing URLs', async () => {
   const { fetch, out, err } = await run({ content: [{ type: 'text', text: JSON.stringify(site) }] })
   expect(fetch).toHaveBeenCalledTimes(1)
   const [url, init] = fetch.mock.calls[0]!
